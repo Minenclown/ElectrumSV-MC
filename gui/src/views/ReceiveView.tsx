@@ -54,8 +54,8 @@ export function ReceiveView() {
   const generateQR = useCallback(async (text: string) => {
     try {
       const result = await api.generateQr(text, {
-        scale: 5,
-        quietZone: 1,
+        scale: 10,
+        quietZone: 4,
       });
       setQrSvg(result.svg);
     } catch {

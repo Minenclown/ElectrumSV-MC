@@ -67,12 +67,23 @@ async-trait = "0.1"
 # QR-Code — PicQr (standalone, ISO/IEC 18004, no external QR libs)
 picqr = { path = "../../picqr", default-features = false, features = ["svg"] }
 
+# QR-Code fallback — battle-tested `qrcode` crate (same algorithm as Python's
+# qrcode library used by the original ElectrumSVP). Enabled via the
+# `qrcode-fallback` feature flag (Murena-Prinzip: OFF by default).
+qrcode = { version = "0.14", optional = true }
+
 [features]
 default = []
 # Hardware-wallet support — compile-time gate for HW-signer code paths.
 # Runtime toggle is `hardware_wallet_enabled` in WalletData DB.
 # Murena-Prinzip: Feature is OFF by default, can be enabled at build time.
 hardware-wallet = []
+
+# QR-Code fallback — uses the battle-tested `qrcode` crate instead of PicQr.
+# Murena-Prinzip: OFF by default (PicQr is used), can be enabled at build time.
+# When enabled, generate_qr delegates to `qrcode` crate for maximum scanner
+# compatibility (same algorithm as Python's qrcode library used by ElectrumSVP).
+qrcode-fallback = ["dep:qrcode"]
 
 [profile.release]
 opt-level = "s"

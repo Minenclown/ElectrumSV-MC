@@ -8,6 +8,12 @@ src-tauri/target/
 gui/node_modules/
 gui/dist/
 
+# Python leftovers (project is now Rust-only)
+.pylintrc
+.pytest_cache/
+__pycache__/
+*.pyc
+
 # IDE
 .idea/
 .vscode/

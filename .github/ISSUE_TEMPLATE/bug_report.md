@@ -1,32 +1,35 @@
 ---
-name: Report a problem
-about: If you want assistance, help with a problem or to report a bug, please fill this out. It will get you a response much faster, and we will ask you to come back and fill it out anyway, if you didn't.
-title: ''
-labels: ''
+name: Bug report
+about: Report a bug or unexpected behavior in ElectrumSV-Mc
+title: '[BUG] '
+labels: bug
 assignees: ''
-
 ---
 
-**Describe the problem**
-A clear and concise description of what the problem is.
+**Describe the bug**
+A clear and concise description of what the bug is.
 
 **To Reproduce**
 Steps to reproduce the behavior:
 1. Go to '...'
 2. Click on '....'
-3. Scroll down to '....'
-4. See error
+3. See error
 
 **Expected behavior**
 A clear and concise description of what you expected to happen.
 
 **Screenshots**
-If applicable, add screenshots to help explain your problem.
+If applicable, add screenshots to help explain the problem.
 
-**Desktop (please complete the following information):**
- - ElectrumSV version: [e.g. 1.3.16]
- - OS: [e.g. iOS]
- - Version [e.g. 22]
+**Environment**
+- ElectrumSV-Mc version: [e.g. 0.1.0]
+- OS: [e.g. Fedora 41]
+- Backend: [PicQr / qrcode-fallback]
+
+**Logs**
+```
+Paste relevant log output here (cargo test output, terminal output, etc.)
+```
 
 **Additional context**
 Add any other context about the problem here.

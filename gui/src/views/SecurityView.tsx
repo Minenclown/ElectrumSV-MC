@@ -50,8 +50,8 @@ export function SecurityView() {
   const generateQR = useCallback(async (uri: string) => {
     try {
       const result = await api.generateQr(uri, {
-        scale: 5,
-        quietZone: 1,
+        scale: 10,
+        quietZone: 4,
         ecLevel: 'M',
       });
       setSetupQrSvg(result.svg);
