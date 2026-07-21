@@ -2,6 +2,7 @@
 pub mod account;
 pub mod config;
 pub mod contacts;
+pub mod desktop_shortcut;
 pub mod ecosystem;
 pub mod events;
 pub mod extra;

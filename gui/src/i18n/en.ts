@@ -17,6 +17,13 @@ export const en = {
     createNew: '+ Create New Wallet',
     footer: 'ElectrumSV-Mc — Standalone BSV Wallet',
     language: 'Language',
+    shortcutTitle: 'Create Desktop Shortcut?',
+    shortcutDesc: 'Would you like to create a desktop shortcut for ElectrumSV-Mc?',
+    shortcutYes: 'Yes, create shortcut',
+    shortcutNo: 'No, maybe later',
+    shortcutCreated: 'Shortcut created!',
+    shortcutFailed: 'Shortcut creation failed',
+    shortcutDontAsk: 'Don\'t ask again',
   },
 
   // Login screen

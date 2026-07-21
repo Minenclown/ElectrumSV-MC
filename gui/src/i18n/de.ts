@@ -18,6 +18,13 @@ export const de: Translations = {
     createNew: '+ Neue Wallet erstellen',
     footer: 'ElectrumSV-Mc — Standalone BSV Wallet',
     language: 'Sprache',
+    shortcutTitle: 'Desktop-Verknüpfung erstellen?',
+    shortcutDesc: 'Möchtest du eine Desktop-Verknüpfung für ElectrumSV-Mc erstellen?',
+    shortcutYes: 'Ja, Verknüpfung erstellen',
+    shortcutNo: 'Nein, vielleicht später',
+    shortcutCreated: 'Verknüpfung erstellt!',
+    shortcutFailed: 'Verknüpfung konnte nicht erstellt werden',
+    shortcutDontAsk: 'Nicht mehr fragen',
   },
 
   login: {

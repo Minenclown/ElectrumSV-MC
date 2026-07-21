@@ -352,6 +352,10 @@ export const api = {
       },
     }),
 
+  // Desktop shortcut (first-launch offer)
+  createDesktopShortcut: () =>
+    invoke<{ created: boolean; path: string | null; message: string }>('create_desktop_shortcut'),
+
   // ─── BSV on-chain data protocol decoding ───────────────────────────
   decodeOutput: (value: number, scriptPubkey: string) =>
     invoke<DecodedOutput>('decode_output', {

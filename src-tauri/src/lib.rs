@@ -115,6 +115,8 @@ pub fn run() {
             commands::account::get_multisig_config,
             // QR code commands (Phase 4 — PicQr integration)
             commands::qrcode::generate_qr,
+            // Desktop shortcut (first-launch offer)
+            commands::desktop_shortcut::create_desktop_shortcut,
             // Feature decoding commands (BSV on-chain data protocols)
             commands::features::decode_output,
             commands::features::decode_tx_outputs,

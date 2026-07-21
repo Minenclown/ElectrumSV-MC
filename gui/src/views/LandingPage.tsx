@@ -1,14 +1,19 @@
 // Landing page — wallet selector (Tauri mode, no REST API needed)
 // Language selector at bottom — persisted in localStorage
+// First-launch desktop shortcut offer (OS auto-detected by backend)
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useStore } from '../store';
 import type { WalletEntry } from '../store';
 import { useTranslation, type Language } from '../i18n';
+import { api } from '../api';
 
 export function LandingPage() {
   const { setView, setSelectedWallet, setWalletList, walletList } = useStore();
   const { t, language, setLanguage } = useTranslation();
+
+  const [showShortcutPrompt, setShowShortcutPrompt] = useState(false);
+  const [shortcutStatus, setShortcutStatus] = useState<string | null>(null);
 
   useEffect(() => {
     // In Tauri mode, the backend is always available (it's the same process)
@@ -23,6 +28,36 @@ export function LandingPage() {
       })
       .catch(() => setWalletList([]));
   }, [setWalletList]);
+
+  useEffect(() => {
+    // Show desktop shortcut prompt on first launch only
+    const dismissed = localStorage.getItem('esvmc_shortcut_dismissed');
+    if (!dismissed) {
+      setShowShortcutPrompt(true);
+    }
+  }, []);
+
+  const handleCreateShortcut = async () => {
+    try {
+      const result = await api.createDesktopShortcut();
+      if (result.created) {
+        setShortcutStatus(t.landing.shortcutCreated);
+      } else {
+        setShortcutStatus(t.landing.shortcutFailed + ': ' + result.message);
+      }
+    } catch (e: any) {
+      setShortcutStatus(t.landing.shortcutFailed + ': ' + (e?.message ?? e));
+    }
+    // Auto-dismiss after 2 seconds
+    setTimeout(() => setShowShortcutPrompt(false), 2000);
+  };
+
+  const handleDismissShortcut = (dontAsk: boolean) => {
+    if (dontAsk) {
+      localStorage.setItem('esvmc_shortcut_dismissed', '1');
+    }
+    setShowShortcutPrompt(false);
+  };
 
   const handleOpen = (walletPath: string) => {
     setSelectedWallet(walletPath);
@@ -76,6 +111,38 @@ export function LandingPage() {
             {t.landing.createNew}
           </button>
         </div>
+
+        {/* Desktop shortcut prompt */}
+        {showShortcutPrompt && (
+          <div className="mt-4 bg-void-900 rounded-xl p-4 border border-void-700">
+            <div className="text-sm font-medium text-accent mb-1">{t.landing.shortcutTitle}</div>
+            <div className="text-xs text-gray-400 mb-3">{t.landing.shortcutDesc}</div>
+            {shortcutStatus && (
+              <div className="text-xs text-green-400 mb-2">{shortcutStatus}</div>
+            )}
+            <div className="flex gap-2">
+              <button
+                onClick={handleCreateShortcut}
+                disabled={!!shortcutStatus}
+                className="flex-1 bg-accent hover:bg-accent-hover text-white rounded-lg px-3 py-1.5 text-xs font-medium disabled:opacity-50 transition-colors"
+              >
+                {t.landing.shortcutYes}
+              </button>
+              <button
+                onClick={() => handleDismissShortcut(false)}
+                className="flex-1 bg-void-800 hover:bg-void-700 text-gray-100 rounded-lg px-3 py-1.5 text-xs transition-colors"
+              >
+                {t.landing.shortcutNo}
+              </button>
+            </div>
+            <button
+              onClick={() => handleDismissShortcut(true)}
+              className="w-full mt-2 text-xs text-gray-500 hover:text-gray-300 transition-colors"
+            >
+              {t.landing.shortcutDontAsk}
+            </button>
+          </div>
+        )}
 
         {/* Language selector */}
         <div className="mt-4 flex items-center justify-center gap-2">
