@@ -42,6 +42,8 @@ pub struct UtxoEntry {
     pub value: i64,
     pub keyinstance_id: i64,
     pub is_coinbase: bool,
+    /// Locking script hex (empty if not available — old rows without migration 0031).
+    pub script_pubkey: String,
 }
 
 /// Receive address response.
@@ -198,6 +200,7 @@ pub async fn get_utxos(
             value: u.value,
             keyinstance_id: u.keyinstance_id,
             is_coinbase: u.is_coinbase,
+            script_pubkey: u.script_pubkey,
         })
         .collect())
 }

@@ -365,6 +365,70 @@ impl std::fmt::Display for AccumulatorMultiSigOutput {
 }
 
 // ---------------------------------------------------------------------------
+// Unlocking script construction
+// ---------------------------------------------------------------------------
+
+/// Build the unlocking script for an AccumulatorMultiSig output.
+///
+/// The locking script processes keys in order 0..n. Each OP_IF consumes
+/// the top of the main stack. Because the unlocking script runs first and
+/// the last-pushed item ends up on top, the items must be pushed in
+/// **reverse** key order (key n-1 first, key 0 last).
+///
+/// For each key (in reverse order):
+/// - If this key is signing: push `<sig> <pubkey> OP_1`
+///   (OP_1 activates the OP_IF branch; OP_DUP + OP_HASH160 + OP_EQUALVERIFY
+///   checks the pubkey hash; OP_CHECKSIGVERIFY verifies the signature.)
+/// - If this key is not signing: push `OP_0`
+///   (OP_0 skips the OP_IF branch.)
+///
+/// `signing_indices` is the set of key indices (0-based, in the public_keys
+/// array) that are providing signatures. The number of signing indices must
+/// be >= threshold.
+///
+/// `signatures` maps key index -> DER-encoded signature (with sighash byte
+/// already appended).
+/// `pubkeys_for_unlock` maps key index -> compressed public key bytes (33 bytes)
+/// for the signing keys.
+pub fn build_unlocking_script(
+    multisig: &AccumulatorMultiSigOutput,
+    signing_indices: &[usize],
+    signatures: &std::collections::HashMap<usize, Vec<u8>>,
+    pubkeys_for_unlock: &std::collections::HashMap<usize, Vec<u8>>,
+) -> Result<Vec<u8>, MultisigError> {
+    if signing_indices.len() < multisig.threshold as usize {
+        return Err(MultisigError::InsufficientSignatures {
+            have: signing_indices.len(),
+            needed: multisig.threshold as usize,
+        });
+    }
+
+    let n = multisig.public_keys.len();
+    let mut script = Vec::new();
+
+    // Push items in reverse key order (n-1 first, 0 last).
+    for key_idx in (0..n).rev() {
+        if signing_indices.contains(&key_idx) {
+            // Push <sig> <pubkey> OP_1
+            let sig = signatures.get(&key_idx).ok_or(MultisigError::MissingSignature(key_idx))?;
+            let pubkey = pubkeys_for_unlock.get(&key_idx).ok_or(MultisigError::MissingPublicKey(key_idx))?;
+
+            // <sig>: push data
+            script.extend_from_slice(&push_item(sig));
+            // <pubkey>: push data
+            script.extend_from_slice(&push_item(pubkey));
+            // OP_1 (true — activates the IF branch)
+            script.push(op::OP_1);
+        } else {
+            // OP_0 (false — skips the IF branch)
+            script.push(op::OP_0);
+        }
+    }
+
+    Ok(script)
+}
+
+// ---------------------------------------------------------------------------
 // Error
 // ---------------------------------------------------------------------------
 
@@ -375,6 +439,12 @@ pub enum MultisigError {
     NoPublicKeys,
     #[error("invalid threshold: must be in 1..=n")]
     InvalidThreshold,
+    #[error("insufficient signatures: have {have}, need {needed}")]
+    InsufficientSignatures { have: usize, needed: usize },
+    #[error("missing signature for key index {0}")]
+    MissingSignature(usize),
+    #[error("missing public key for key index {0}")]
+    MissingPublicKey(usize),
 }
 
 // ===========================================================================
@@ -476,5 +546,89 @@ mod tests {
         let pushed = push_item(&data);
         assert_eq!(pushed[0], 20); // length prefix
         assert_eq!(&pushed[1..], &data[..]);
+    }
+
+    // --- Tests for build_unlocking_script ---
+
+    #[test]
+    fn test_unlocking_script_1of2_single_signer() {
+        let keys = vec![dummy_pk(1), dummy_pk(2)];
+        let ms = AccumulatorMultiSigOutput::new(keys, 1).expect("valid 1-of-2");
+
+        // Key 0 signs
+        let signing_indices = vec![0];
+        let mut sigs = std::collections::HashMap::new();
+        sigs.insert(0, vec![0xaa; 70]); // dummy sig
+        let mut pkmap = std::collections::HashMap::new();
+        pkmap.insert(0, dummy_pk(1));
+
+        let script = build_unlocking_script(&ms, &signing_indices, &sigs, &pkmap).unwrap();
+        // For 2 keys, reverse order: key1 (OP_0), key0 (<sig> <pubkey> OP_1)
+        // Last 3 items pushed are for key 0
+        assert!(!script.is_empty());
+        // First byte: OP_0 for key 1 (not signing)
+        assert_eq!(script[0], op::OP_0);
+    }
+
+    #[test]
+    fn test_unlocking_script_2of3_both_sign() {
+        let keys = vec![dummy_pk(1), dummy_pk(2), dummy_pk(3)];
+        let ms = AccumulatorMultiSigOutput::new(keys, 2).expect("valid 2-of-3");
+
+        // Keys 0 and 1 sign
+        let signing_indices = vec![0, 1];
+        let mut sigs = std::collections::HashMap::new();
+        sigs.insert(0, vec![0xaa; 70]);
+        sigs.insert(1, vec![0xbb; 70]);
+        let mut pkmap = std::collections::HashMap::new();
+        pkmap.insert(0, dummy_pk(1));
+        pkmap.insert(1, dummy_pk(2));
+
+        let script = build_unlocking_script(&ms, &signing_indices, &sigs, &pkmap).unwrap();
+        // For 3 keys, reverse: key2 (OP_0), key1 (<sig> <pk> OP_1), key0 (<sig> <pk> OP_1)
+        assert!(!script.is_empty());
+        // First byte: OP_0 for key 2 (not signing)
+        assert_eq!(script[0], op::OP_0);
+        // Should contain two OP_1 markers for the two signing keys
+        let op1_count = script.iter().filter(|&&b| b == op::OP_1).count();
+        assert_eq!(op1_count, 2, "two OP_1 for two signing keys");
+    }
+
+    #[test]
+    fn test_unlocking_script_insufficient_signatures() {
+        let keys = vec![dummy_pk(1), dummy_pk(2)];
+        let ms = AccumulatorMultiSigOutput::new(keys, 2).expect("valid 2-of-2");
+
+        // Only 1 key signs but threshold is 2
+        let signing_indices = vec![0];
+        let sigs = std::collections::HashMap::new();
+        let pkmap = std::collections::HashMap::new();
+
+        let result = build_unlocking_script(&ms, &signing_indices, &sigs, &pkmap);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, MultisigError::InsufficientSignatures { have: 1, needed: 2 }));
+    }
+
+    #[test]
+    fn test_unlocking_script_all_keys_sign() {
+        let keys = vec![dummy_pk(1), dummy_pk(2)];
+        let ms = AccumulatorMultiSigOutput::new(keys, 2).expect("valid 2-of-2");
+
+        // Both keys sign
+        let signing_indices = vec![0, 1];
+        let mut sigs = std::collections::HashMap::new();
+        sigs.insert(0, vec![0xaa; 70]);
+        sigs.insert(1, vec![0xbb; 70]);
+        let mut pkmap = std::collections::HashMap::new();
+        pkmap.insert(0, dummy_pk(1));
+        pkmap.insert(1, dummy_pk(2));
+
+        let script = build_unlocking_script(&ms, &signing_indices, &sigs, &pkmap).unwrap();
+        // No OP_0 at all — all keys sign
+        let op0_count = script.iter().filter(|&&b| b == op::OP_0).count();
+        assert_eq!(op0_count, 0, "no OP_0 when all keys sign");
+        let op1_count = script.iter().filter(|&&b| b == op::OP_1).count();
+        assert_eq!(op1_count, 2, "two OP_1 for two signing keys");
     }
 }

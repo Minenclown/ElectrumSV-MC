@@ -26,7 +26,7 @@ export function OrdinalsView() {
           .filter((u: any) => u.value === 1)
           .map((u: any) => ({
             value: u.value,
-            script_pubkey: u.script_pubkey || u.script || '',
+            script_pubkey: u.script_pubkey || '',
           }));
 
         if (oneSatOutputs.length === 0) {

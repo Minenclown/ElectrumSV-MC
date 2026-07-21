@@ -4,6 +4,7 @@
 // Labels are stored in the description column of KeyInstances / Transactions.
 
 use crate::db::repositories;
+use crate::features::label_sync::{LabelKind, WalletLabel};
 use crate::state::AppState;
 use tauri::State;
 
@@ -75,6 +76,59 @@ pub async fn set_tx_label(
         .map_err(|e| e.to_string())?;
 
     Ok(())
+}
+
+/// Load all labels (address + transaction) from the local database.
+///
+/// Returns a `Vec<WalletLabel>` combining:
+/// - KeyInstance labels (kind = `Address`, id = `"key-{keyinstance_id}"`)
+/// - Transaction labels (kind = `Transaction`, id = display hex txid)
+///
+/// KeyInstance ids use the `key-` prefix because deriving the actual address
+/// requires the xprv, which may not be unlocked.
+#[tauri::command]
+pub async fn get_all_labels(state: State<'_, AppState>) -> Result<Vec<WalletLabel>, String> {
+    log::info!("get_all_labels");
+
+    let pool = {
+        let guard = state.active_wallet.lock().unwrap();
+        guard
+            .as_ref()
+            .ok_or("no wallet is currently open")?
+            .db_pool
+            .clone()
+    };
+
+    let mut labels = Vec::new();
+
+    // KeyInstance (address) labels
+    let key_labels = repositories::get_all_key_labels(&pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    for (ki_id, description, updated_at) in key_labels {
+        labels.push(WalletLabel {
+            id: format!("key-{}", ki_id),
+            kind: LabelKind::Address,
+            label: description,
+            updated_at,
+        });
+    }
+
+    // Transaction labels
+    let tx_labels = repositories::get_all_tx_labels(&pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    for (tx_hash_hex, description, updated_at) in tx_labels {
+        labels.push(WalletLabel {
+            id: tx_hash_hex,
+            kind: LabelKind::Transaction,
+            label: description,
+            updated_at,
+        });
+    }
+
+    log::info!("get_all_labels — returning {} labels", labels.len());
+    Ok(labels)
 }
 
 #[cfg(test)]
@@ -265,5 +319,97 @@ mod tests {
         let odd_hex = "abc";
         let result = hex::decode(odd_hex);
         assert!(result.is_err(), "odd-length hex should fail to decode");
+    }
+
+    #[tokio::test]
+    async fn test_get_all_labels_combines_key_and_tx_labels() {
+        let state = make_test_state("lbl_all");
+        wallet_service::create_wallet(&state, "test_all", "pw123", None, None)
+            .await
+            .unwrap();
+
+        let (pool, _acct_id, ki_id) = setup_keyinstance(&state).await;
+
+        // Set a key label
+        repositories::set_keyinstance_label(&pool, ki_id, Some("Addr 1"))
+            .await
+            .unwrap();
+
+        // Insert a transaction and set a tx label
+        let tx_hash_internal = vec![0x11, 0x22, 0x33, 0x44];
+        let now = chrono::Utc::now().timestamp();
+        sqlx::query(
+            "INSERT INTO Transactions (tx_hash, block_height, flags, date_created, date_updated) VALUES (?, NULL, 0, ?, ?)",
+        )
+        .bind(&tx_hash_internal)
+        .bind(now)
+        .bind(now)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        repositories::set_transaction_label(&pool, &tx_hash_internal, Some("My Tx"))
+            .await
+            .unwrap();
+
+        // Query all labels via the repository functions
+        let key_labels = repositories::get_all_key_labels(&pool).await.unwrap();
+        assert_eq!(key_labels.len(), 1);
+        assert_eq!(key_labels[0].0, ki_id);
+        assert_eq!(key_labels[0].1, "Addr 1");
+
+        let tx_labels = repositories::get_all_tx_labels(&pool).await.unwrap();
+        assert_eq!(tx_labels.len(), 1);
+        // Display hex = reversed internal bytes
+        let expected_display = hex::encode({
+            let mut v = tx_hash_internal.clone();
+            v.reverse();
+            v
+        });
+        assert_eq!(tx_labels[0].0, expected_display);
+        assert_eq!(tx_labels[0].1, "My Tx");
+
+        // Simulate get_all_labels command logic: combine both
+        let mut all = Vec::new();
+        for (id, desc, ts) in key_labels {
+            all.push((format!("key-{}", id), "address", desc, ts));
+        }
+        for (id, desc, ts) in tx_labels {
+            all.push((id, "transaction", desc, ts));
+        }
+        assert_eq!(all.len(), 2);
+
+        // Verify key label entry
+        let key_entry = all.iter().find(|(id, kind, _, _)| kind == &"address").unwrap();
+        assert_eq!(key_entry.0, format!("key-{}", ki_id));
+        assert_eq!(key_entry.2, "Addr 1");
+
+        // Verify tx label entry
+        let tx_entry = all.iter().find(|(_, kind, _, _)| kind == &"transaction").unwrap();
+        assert_eq!(tx_entry.0, expected_display);
+        assert_eq!(tx_entry.2, "My Tx");
+
+        pool.close().await;
+        wallet_service::close_wallet(&state).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_get_all_labels_empty_when_no_labels() {
+        let state = make_test_state("lbl_empty");
+        wallet_service::create_wallet(&state, "test_empty", "pw123", None, None)
+            .await
+            .unwrap();
+
+        let (pool, _acct_id, _ki_id) = setup_keyinstance(&state).await;
+
+        // No labels set — both queries should return empty
+        let key_labels = repositories::get_all_key_labels(&pool).await.unwrap();
+        assert!(key_labels.is_empty(), "no key labels expected");
+
+        let tx_labels = repositories::get_all_tx_labels(&pool).await.unwrap();
+        assert!(tx_labels.is_empty(), "no tx labels expected");
+
+        pool.close().await;
+        wallet_service::close_wallet(&state).unwrap();
     }
 }

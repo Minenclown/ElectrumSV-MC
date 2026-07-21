@@ -120,7 +120,7 @@ impl LocalSigner {
     }
 
     /// Derive the private key for a given subpath (e.g. [0, 3] → "0/3").
-    fn derive_private_key(&self, subpath: &[u32; 2]) -> Result<PrivateKey, SignerError> {
+    pub fn derive_private_key(&self, subpath: &[u32; 2]) -> Result<PrivateKey, SignerError> {
         let account_key = ExtendedKey::from_string(&self.xprv)?;
         let path = format!("{}/{}", subpath[0], subpath[1]);
         let child_key = account_key.derive(&path)?;
@@ -249,6 +249,164 @@ impl Signer for HardwareSigner {
             "hardware wallet signing not yet implemented (device: {})",
             self.device_id
         )))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MultisigSigner — signs an AccumulatorMultiSig transaction input
+// ---------------------------------------------------------------------------
+
+/// Signer for AccumulatorMultiSig outputs.
+///
+/// This signer signs all inputs of a transaction that spends UTXOs locked
+/// with an `AccumulatorMultiSigOutput` script. It uses the local cosigner's
+/// xprv to derive the private key for each input, computes the BIP143/ForkID
+/// sighash preimage, signs it, and constructs the unlocking script via
+/// `multisig::build_unlocking_script`.
+///
+/// The caller must provide:
+/// - `xprv`: the account-level extended private key of the local cosigner
+/// - `multisig`: the multisig configuration (public keys + threshold)
+/// - `local_key_index`: the index of the local cosigner's public key in the
+///   `multisig.public_keys` array
+/// - `local_subpath`: the derivation subpath `[chain, index]` for the local
+///   cosigner's key that owns the UTXOs (all UTXOs must use the same subpath
+///   for this signer — typically a multisig account uses a single key)
+pub struct MultisigSigner {
+    xprv: String,
+    multisig: crate::core::multisig::AccumulatorMultiSigOutput,
+    local_key_index: usize,
+}
+
+impl MultisigSigner {
+    /// Create a new MultisigSigner.
+    ///
+    /// - `xprv`: account-level xprv of the local cosigner (Base58Check)
+    /// - `multisig`: the accumulator multisig configuration
+    /// - `local_key_index`: 0-based index of the local key in `multisig.public_keys`
+    pub fn new(
+        xprv: &str,
+        multisig: crate::core::multisig::AccumulatorMultiSigOutput,
+        local_key_index: usize,
+    ) -> Result<Self, SignerError> {
+        if local_key_index >= multisig.public_keys.len() {
+            return Err(SignerError::CannotSign(format!(
+                "local_key_index {} out of range (n={})",
+                local_key_index,
+                multisig.public_keys.len()
+            )));
+        }
+        Ok(Self {
+            xprv: xprv.to_string(),
+            multisig,
+            local_key_index,
+        })
+    }
+}
+
+impl Signer for MultisigSigner {
+    fn signer_type(&self) -> SignerType {
+        SignerType::Local
+    }
+
+    fn can_sign(&self) -> bool {
+        !self.xprv.is_empty()
+    }
+
+    fn sign_tx(&self, tx: &mut Transaction, inputs: &[SelectedUtxo]) -> Result<(), SignerError> {
+        if !self.can_sign() {
+            return Err(SignerError::CannotSign("xprv is empty".to_string()));
+        }
+        if tx.inputs.len() != inputs.len() {
+            return Err(SignerError::InputMismatch {
+                index: 0,
+                expected: tx.inputs.len(),
+                actual: inputs.len(),
+            });
+        }
+
+        let sighash_type = SIGHASH_ALL | SIGHASH_FORKID; // 0x41
+
+        // The local cosigner's key index in the multisig public_keys array.
+        let local_idx = self.local_key_index;
+        let signing_indices = vec![local_idx];
+
+        // Derive the local private key once (all inputs use the same key for
+        // this signer — the subpath is taken from the first input).
+        if inputs.is_empty() {
+            return Err(SignerError::CannotSign("no inputs to sign".to_string()));
+        }
+        let priv_key = {
+            // Reuse the derivation logic from LocalSigner.
+            let local_signer = LocalSigner::new(&self.xprv);
+            local_signer.derive_private_key(&inputs[0].subpath)?
+        };
+
+        let pubkey = priv_key.to_public_key();
+        let pubkey_der = pubkey.to_der(); // compressed public key bytes
+
+        // Verify the local public key matches the one in the multisig config.
+        let expected_pk = &self.multisig.public_keys[local_idx];
+        if expected_pk != &pubkey_der {
+            return Err(SignerError::CannotSign(format!(
+                "local public key does not match multisig config key at index {}",
+                local_idx
+            )));
+        }
+
+        // Build the locking script (AccumulatorMultiSig) — needed as the
+        // source_locking_script for sighash preimage computation.
+        let locking_script_bytes = self.multisig.to_script_bytes();
+        let source_locking_script =
+            bsv::script::locking_script::LockingScript::from_script(
+                bsv::script::script::Script::from_binary(&locking_script_bytes),
+            );
+
+        // Sign each input.
+        for (i, utxo) in inputs.iter().enumerate() {
+            if tx.inputs[i].source_txid.is_none() {
+                return Err(SignerError::NoSourceTxid { index: i });
+            }
+
+            // Compute BIP143/ForkID sighash preimage.
+            let preimage = tx
+                .sighash_preimage(i, sighash_type, utxo.satoshis, &source_locking_script)?;
+
+            // Double-hash the preimage (hash256 = sha256(sha256(x))).
+            let msg_hash = bsv::primitives::hash::hash256(&preimage);
+
+            // Sign the 32-byte hash.
+            let sig = priv_key
+                .sign(&msg_hash, true)
+                .map_err(|e| SignerError::SigningFailed(e.to_string()))?;
+
+            // Build the signature bytes: DER + sighash byte.
+            let mut sig_bytes = sig.to_der();
+            sig_bytes.push(sighash_type as u8);
+
+            // Build the unlocking script for this input.
+            let mut signatures = std::collections::HashMap::new();
+            signatures.insert(local_idx, sig_bytes);
+            let mut pubkeys_for_unlock = std::collections::HashMap::new();
+            pubkeys_for_unlock.insert(local_idx, pubkey_der.clone());
+
+            let unlock_bytes = crate::core::multisig::build_unlocking_script(
+                &self.multisig,
+                &signing_indices,
+                &signatures,
+                &pubkeys_for_unlock,
+            )
+            .map_err(|e| SignerError::SigningFailed(e.to_string()))?;
+
+            // Set the unlocking script on the input.
+            let unlock_script =
+                bsv::script::unlocking_script::UnlockingScript::from_script(
+                    bsv::script::script::Script::from_binary(&unlock_bytes),
+                );
+            tx.inputs[i].unlocking_script = Some(unlock_script);
+        }
+
+        Ok(())
     }
 }
 
@@ -459,5 +617,136 @@ mod tests {
         // Verify txid
         let txid = tx.id().unwrap();
         assert_eq!(txid.len(), 64);
+    }
+
+    // --- MultisigSigner tests ---
+
+    #[test]
+    fn test_multisig_signer_type_and_can_sign() {
+        let xprv = get_test_xprv();
+        let account_key = ExtendedKey::from_string(&xprv).unwrap();
+        let child = account_key.derive("0/0").unwrap();
+        let pubkey = child.public_key().unwrap();
+        let pubkey_der = pubkey.to_der();
+
+        let ms = crate::core::multisig::AccumulatorMultiSigOutput::new(
+            vec![pubkey_der, vec![0x02; 33]],
+            1,
+        )
+        .expect("valid 1-of-2");
+
+        let signer = MultisigSigner::new(&xprv, ms, 0).expect("valid signer");
+        assert_eq!(signer.signer_type(), SignerType::Local);
+        assert!(signer.can_sign());
+    }
+
+    #[test]
+    fn test_multisig_signer_invalid_key_index() {
+        let xprv = get_test_xprv();
+        let ms = crate::core::multisig::AccumulatorMultiSigOutput::new(
+            vec![vec![0x01; 33], vec![0x02; 33]],
+            1,
+        )
+        .expect("valid 1-of-2");
+
+        // Index 5 is out of range (n=2)
+        let result = MultisigSigner::new(&xprv, ms, 5);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_multisig_signer_signs_transaction() {
+        let xprv = get_test_xprv();
+        let account_key = ExtendedKey::from_string(&xprv).unwrap();
+        let child = account_key.derive("0/0").unwrap();
+        let pubkey = child.public_key().unwrap();
+        let pubkey_der = pubkey.to_der();
+
+        // 1-of-2 multisig: local key is at index 0
+        let ms = crate::core::multisig::AccumulatorMultiSigOutput::new(
+            vec![pubkey_der, vec![0x02; 33]],
+            1,
+        )
+        .expect("valid 1-of-2");
+
+        let signer = MultisigSigner::new(&xprv, ms, 0).expect("valid signer");
+
+        let utxos = vec![SelectedUtxo {
+            tx_hash_hex: "a477af6b2667c29670467e4e0728b685ee07b240235771862318e29ddbe58458".to_string(),
+            tx_index: 0,
+            satoshis: 100_000,
+            keyinstance_id: 1,
+            subpath: [0, 0],
+        }];
+
+        let outputs = vec![PaymentOutput {
+            address: "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa".to_string(),
+            satoshis: 50_000,
+        }];
+
+        // Build a raw transaction (not using TxBuilder which creates P2PKH outputs)
+        let mut tx = bsv::transaction::transaction::Transaction::new();
+        tx.add_input(bsv::transaction::transaction_input::TransactionInput {
+            source_txid: Some(utxos[0].tx_hash_hex.clone()),
+            source_output_index: 0,
+            sequence: 0xFFFFFFFF,
+            ..Default::default()
+        });
+        let p2pkh = P2PKH::from_address(&outputs[0].address).unwrap();
+        let lock_script = p2pkh.lock().unwrap();
+        tx.add_output(bsv::transaction::transaction_output::TransactionOutput {
+            satoshis: Some(50_000),
+            locking_script: lock_script,
+            change: false,
+        });
+
+        // Before signing: no unlocking script
+        assert!(tx.inputs[0].unlocking_script.is_none());
+
+        // Sign
+        signer.sign_tx(&mut tx, &utxos).unwrap();
+
+        // After signing: unlocking script should be set
+        assert!(tx.inputs[0].unlocking_script.is_some());
+
+        // Verify txid can be computed
+        let txid = tx.id().unwrap();
+        assert_eq!(txid.len(), 64);
+    }
+
+    #[test]
+    fn test_multisig_signer_wrong_public_key() {
+        let xprv = get_test_xprv();
+
+        // The multisig config has a different key at index 0 than what the
+        // xprv derives — signing should fail.
+        let ms = crate::core::multisig::AccumulatorMultiSigOutput::new(
+            vec![vec![0x99; 33], vec![0x02; 33]],
+            1,
+        )
+        .expect("valid 1-of-2");
+
+        let signer = MultisigSigner::new(&xprv, ms, 0).expect("signer created");
+
+        let utxos = vec![SelectedUtxo {
+            tx_hash_hex: "a477af6b2667c29670467e4e0728b685ee07b240235771862318e29ddbe58458".to_string(),
+            tx_index: 0,
+            satoshis: 100_000,
+            keyinstance_id: 1,
+            subpath: [0, 0],
+        }];
+
+        let mut tx = bsv::transaction::transaction::Transaction::new();
+        tx.add_input(bsv::transaction::transaction_input::TransactionInput {
+            source_txid: Some(utxos[0].tx_hash_hex.clone()),
+            source_output_index: 0,
+            sequence: 0xFFFFFFFF,
+            ..Default::default()
+        });
+
+        let result = signer.sign_tx(&mut tx, &utxos);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, SignerError::CannotSign(_)));
     }
 }

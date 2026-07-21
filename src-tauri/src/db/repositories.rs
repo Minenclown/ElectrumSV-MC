@@ -266,6 +266,8 @@ pub struct TransactionOutputRow {
     pub flags: i32,
     pub date_created: i64,
     pub date_updated: i64,
+    /// Locking script hex (added in migration 0031; NULL for old rows).
+    pub script_pubkey: Option<String>,
 }
 
 /// Get all unspent TransactionOutputs (UTXOs) for KeyInstances of an account.
@@ -397,6 +399,8 @@ pub struct UtxoInfo {
     pub value: i64,
     pub keyinstance_id: i64,
     pub is_coinbase: bool,
+    /// Locking script hex (empty string if not available — old rows).
+    pub script_pubkey: String,
 }
 
 /// Get UTXOs for an account as serializable UtxoInfo.
@@ -414,6 +418,7 @@ pub async fn get_utxo_infos_for_account(
             value: row.value,
             keyinstance_id: row.keyinstance_id,
             is_coinbase: (row.flags & txo_flags::IS_COINBASE) != 0,
+            script_pubkey: row.script_pubkey.unwrap_or_default(),
         })
         .collect();
 
@@ -483,16 +488,18 @@ pub async fn upsert_transaction_output(
     value: i64,
     keyinstance_id: i64,
     flags: i32,
+    script_pubkey: Option<&str>,
 ) -> anyhow::Result<()> {
     let now = chrono::Utc::now().timestamp();
 
     sqlx::query(
-        "INSERT INTO TransactionOutputs (tx_hash, tx_index, value, keyinstance_id, flags, date_created, date_updated) \
-         VALUES (?, ?, ?, ?, ?, ?, ?) \
+        "INSERT INTO TransactionOutputs (tx_hash, tx_index, value, keyinstance_id, flags, script_pubkey, date_created, date_updated) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?) \
          ON CONFLICT(tx_hash, tx_index) DO UPDATE SET \
             value = excluded.value, \
             keyinstance_id = excluded.keyinstance_id, \
             flags = excluded.flags, \
+            script_pubkey = COALESCE(excluded.script_pubkey, TransactionOutputs.script_pubkey), \
             date_updated = excluded.date_updated",
     )
     .bind(tx_hash)
@@ -500,6 +507,7 @@ pub async fn upsert_transaction_output(
     .bind(value)
     .bind(keyinstance_id)
     .bind(flags)
+    .bind(script_pubkey)
     .bind(now)
     .bind(now)
     .execute(pool)
@@ -925,6 +933,51 @@ pub async fn get_transaction_label(
     Ok(row.and_then(|(v,)| v))
 }
 
+/// Get all KeyInstance labels (where description IS NOT NULL).
+///
+/// Returns `(keyinstance_id, description, date_updated)` for every KeyInstance
+/// that has a non-NULL description.  The caller is responsible for deriving
+/// the address from the keyinstance's derivation data (which requires the
+/// xprv); when the xprv is not unlocked, the keyinstance_id can be used as a
+/// placeholder identifier.
+pub async fn get_all_key_labels(
+    pool: &SqlitePool,
+) -> anyhow::Result<Vec<(i64, String, i64)>> {
+    let rows: Vec<(i64, String, i64)> = sqlx::query_as(
+        "SELECT keyinstance_id, description, date_updated \
+         FROM KeyInstances WHERE description IS NOT NULL ORDER BY keyinstance_id",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+/// Get all Transaction labels (where description IS NOT NULL).
+///
+/// Returns `(tx_hash_hex, description, date_updated)` where `tx_hash_hex` is
+/// the **display** hex (reversed byte order) of the internal `tx_hash` BLOB.
+pub async fn get_all_tx_labels(
+    pool: &SqlitePool,
+) -> anyhow::Result<Vec<(String, String, i64)>> {
+    // tx_hash is stored as a BLOB in internal byte order; reverse to get the
+    // display hex txid (same pattern as the `set_tx_label` command).
+    let rows: Vec<(Vec<u8>, String, i64)> = sqlx::query_as(
+        "SELECT tx_hash, description, date_updated \
+         FROM Transactions WHERE description IS NOT NULL ORDER BY date_updated",
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let result = rows
+        .into_iter()
+        .map(|(mut hash, label, updated)| {
+            hash.reverse();
+            (hex::encode(&hash), label, updated)
+        })
+        .collect();
+    Ok(result)
+}
+
 // ============================================================================
 // Payment request queries (PaymentRequests table from migration 0022)
 // ============================================================================
@@ -1339,7 +1392,7 @@ mod tests {
 
         // migration key should already be set by create_wallet_db
         let migration = get_wallet_data(&pool, "migration").await.unwrap();
-        assert_eq!(migration, Some("30".to_string()));
+        assert_eq!(migration, Some("31".to_string()));
 
         // Set a new key
         set_wallet_data(&pool, "password-token", "encrypted_token")
@@ -1477,7 +1530,7 @@ mod tests {
         upsert_transaction(&pool, &tx_hash, Some(800000), None)
             .await
             .unwrap();
-        upsert_transaction_output(&pool, &tx_hash, 0, 50000, ki_id, 0)
+        upsert_transaction_output(&pool, &tx_hash, 0, 50000, ki_id, 0, None)
             .await
             .unwrap();
 
@@ -1577,7 +1630,7 @@ mod tests {
         upsert_transaction(&pool, &tx_hash, Some(800000), None)
             .await
             .unwrap();
-        upsert_transaction_output(&pool, &tx_hash, 0, 50000, ki_id, 0)
+        upsert_transaction_output(&pool, &tx_hash, 0, 50000, ki_id, 0, None)
             .await
             .unwrap();
 
@@ -1626,7 +1679,7 @@ mod tests {
         upsert_transaction(&pool, &tx_hash, Some(800000), None)
             .await
             .unwrap();
-        upsert_transaction_output(&pool, &tx_hash, 0, 50000, ki_id, 0)
+        upsert_transaction_output(&pool, &tx_hash, 0, 50000, ki_id, 0, None)
             .await
             .unwrap();
         upsert_transaction_delta(&pool, ki_id, &tx_hash, 50000)

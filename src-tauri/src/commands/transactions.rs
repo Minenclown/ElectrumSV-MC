@@ -532,6 +532,116 @@ pub async fn estimate_fee(
     })
 }
 
+/// Sign a multisig transaction plan.
+///
+/// Like `sign_tx` but for multisig accounts: uses the `MultisigSigner` to
+/// sign with the local cosigner's key. The caller must provide the
+/// `local_key_index` — the 0-based position of the local cosigner's public
+/// key in the multisig config's `public_keys` array.
+///
+/// AUD-007: Requires TOTP verification before signing.
+/// AUD-008: The plan is fetched server-side by `plan_id`.
+#[tauri::command]
+pub async fn sign_multisig_tx(
+    state: State<'_, AppState>,
+    plan_id: String,
+    totp_code: String,
+    local_key_index: usize,
+) -> Result<SignTxResult, String> {
+    log::info!(
+        "sign_multisig_tx — plan_id: {}, local_key_index: {}",
+        plan_id,
+        local_key_index
+    );
+
+    let (pool, account_id, wallet_path, xprv_opt) = get_wallet_data(&state).map_err(|e| e.to_string())?;
+
+    let xprv = xprv_opt.ok_or(TransactionCmdError::WalletLocked.to_string())?;
+
+    // Retrieve the plan from the server-side store.
+    let plan = {
+        let mut plans = state.pending_plans.lock().unwrap();
+        let now = chrono::Utc::now().timestamp();
+        plans.retain(|_, pp| now - pp.created_at < PLAN_STORE_TTL);
+        match plans.remove(&plan_id) {
+            Some(pp) => pp.plan,
+            None => return Err(TransactionCmdError::PlanNotFound.to_string()),
+        }
+    };
+
+    // AUD-007: Verify wallet binding
+    if plan.wallet_path != wallet_path {
+        return Err(TransactionCmdError::WalletMismatch.to_string());
+    }
+
+    // AUD-007: Verify plan is not expired
+    let now = chrono::Utc::now().timestamp();
+    if now > plan.expires_at {
+        return Err(TransactionCmdError::PlanExpired.to_string());
+    }
+
+    if plan.signed {
+        return Err(TransactionCmdError::AlreadySigned.to_string());
+    }
+
+    // TOTP verification
+    let totp_enabled = repositories::is_totp_enabled(&pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    if !totp_enabled {
+        return Err(TransactionCmdError::TotpNotEnabled.to_string());
+    }
+    let encrypted_secret = repositories::load_totp_secret(&pool)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or(TransactionCmdError::TotpNotEnabled.to_string())?;
+    let totp = TotpInstance::from_secret_bytes(&encrypted_secret, "ElectrumSV-Mc", "wallet")
+        .map_err(|e| e.to_string())?;
+    let valid = totp.verify_current(&totp_code).map_err(|e| e.to_string())?;
+    if !valid {
+        return Err(TransactionCmdError::TotpVerificationFailed.to_string());
+    }
+
+    // Load the multisig config for this account.
+    let msig_config = repositories::get_multisig_config(&pool, account_id)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| {
+            TransactionCmdError::Signer("account is not a multisig account".to_string()).to_string()
+        })?;
+
+    // Parse the hex public keys into bytes.
+    let pk_bytes: Vec<Vec<u8>> = msig_config
+        .public_keys
+        .iter()
+        .map(|h| hex::decode(h).map_err(|e| format!("invalid hex pubkey: {}", e)))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let multisig = crate::core::multisig::AccumulatorMultiSigOutput::new(pk_bytes, msig_config.threshold)
+        .map_err(|e| TransactionCmdError::Signer(e.to_string()).to_string())?;
+
+    // Parse the unsigned transaction.
+    let mut tx = bsv::transaction::transaction::Transaction::from_hex(&plan.unsigned_tx_hex)
+        .map_err(|e| e.to_string())?;
+
+    // Sign with MultisigSigner.
+    let signer = crate::core::signer::MultisigSigner::new(&xprv, multisig, local_key_index)
+        .map_err(|e| e.to_string())?;
+    signer
+        .sign_tx(&mut tx, &plan.inputs)
+        .map_err(|e| e.to_string())?;
+
+    let txid = tx.id().map_err(|e| e.to_string())?;
+    let signed_hex = tx.to_hex().map_err(|e| e.to_string())?;
+
+    log::info!("Multisig TX signed — txid: {}", txid);
+
+    Ok(SignTxResult {
+        txid,
+        signed_tx_hex: signed_hex,
+    })
+}
+
 // ============================================================================
 // Tests
 // ============================================================================

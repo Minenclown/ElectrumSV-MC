@@ -538,6 +538,7 @@ pub async fn sync_wallet(
                 utxo.value as i64,
                 ki.keyinstance_id,
                 0, // flags = 0 (unspent, not coinbase)
+                None, // script_pubkey — WoC backend doesn't provide it here
             )
             .await
             .map_err(|e| format!("failed to upsert transaction output: {e}"))?;

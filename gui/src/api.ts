@@ -36,6 +36,7 @@ export interface UtxoEntry {
   value: number;
   keyinstance_id: number;
   is_coinbase: boolean;
+  script_pubkey: string;
 }
 
 /** HistoryEntry matches Rust `commands::account::HistoryEntry` — wallet transaction history. */
@@ -433,7 +434,26 @@ export const api = {
   cosignerDeleteTx: (baseUrl: string, walletId: string, txid: string) =>
     invoke<void>('cosigner_delete_tx', { baseUrl, walletId, txid }),
 
+  // ─── Multisig signing (sign_multisig_tx) ──────────────────────────────
+  /** Sign a prepared multisig TX plan locally with the key at `localKeyIndex`.
+   *  Requires a valid `planId` from prepare_tx; for cosigner-pool TXs without
+   *  a server-side plan, pass the txid as a placeholder and note the caveat. */
+  signMultisigTx: (planId: string, totpCode: string, localKeyIndex: number) =>
+    invoke<{ txid: string; signed_tx_hex: string }>('sign_multisig_tx', {
+      planId,
+      totpCode,
+      localKeyIndex,
+    }),
+
   // ─── Label Sync ─────────────────────────────────────────────────────
+  getAllLabels: () =>
+    invoke<Array<{
+      id: string;
+      kind: 'address' | 'transaction';
+      label: string;
+      updated_at: number;
+    }>>('get_all_labels'),
+
   labelSyncPush: (
     baseUrl: string,
     walletId: string,

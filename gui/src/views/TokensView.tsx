@@ -24,7 +24,7 @@ export function TokensView() {
       .then(async (utxos: any[]) => {
         const outputs = utxos.map((u: any) => ({
           value: u.value,
-          script_pubkey: u.script_pubkey || u.script || '',
+          script_pubkey: u.script_pubkey || '',
         }));
 
         const [tokenResults, protocolResults] = await Promise.all([

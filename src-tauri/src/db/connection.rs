@@ -9,7 +9,7 @@ use std::path::Path;
 use std::str::FromStr;
 
 /// Current migration version (matches Python MIGRATION_CURRENT).
-pub const MIGRATION_CURRENT: i64 = 30;
+pub const MIGRATION_CURRENT: i64 = 31;
 
 /// First migration version (matches Python MIGRATION_FIRST).
 pub const MIGRATION_FIRST: i64 = 22;
@@ -32,9 +32,11 @@ const SQL_0028: &str = include_str!("../../migrations/0028_totp_recovery_codes.s
 const SQL_0029: &str = include_str!("../../migrations/0029_contacts.sql");
 /// SQL for migration 0030 — multisig account configurations table.
 const SQL_0030: &str = include_str!("../../migrations/0030_multisig_configs.sql");
+/// SQL for migration 0031 — add script_pubkey to TransactionOutputs.
+const SQL_0031: &str = include_str!("../../migrations/0031_txo_script_pubkey.sql");
 
 /// All migration SQL in order.
-const ALL_MIGRATIONS: [(i64, &str); 9] = [
+const ALL_MIGRATIONS: [(i64, &str); 10] = [
     (22, SQL_0022),
     (23, SQL_0023),
     (24, SQL_0024),
@@ -44,6 +46,7 @@ const ALL_MIGRATIONS: [(i64, &str); 9] = [
     (28, SQL_0028),
     (29, SQL_0029),
     (30, SQL_0030),
+    (31, SQL_0031),
 ];
 
 /// Create a new wallet database file from scratch.
@@ -391,7 +394,7 @@ mod tests {
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(row.0, "30");
+        assert_eq!(row.0, "31");
 
         // Check MasterKeys table exists
         let count: (i64,) = sqlx::query_as("SELECT count(*) FROM MasterKeys")

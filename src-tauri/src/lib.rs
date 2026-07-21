@@ -71,6 +71,7 @@ pub fn run() {
             // Transaction commands (Milestone 5 — Send/Sign Workflow)
             commands::transactions::prepare_tx,
             commands::transactions::sign_tx,
+            commands::transactions::sign_multisig_tx,
             commands::transactions::broadcast_tx,
             commands::transactions::estimate_fee,
             // TOTP commands (Milestone 5 — AUD-007)
@@ -92,6 +93,7 @@ pub fn run() {
             // Labels commands (Milestone 6)
             commands::labels::set_key_label,
             commands::labels::set_tx_label,
+            commands::labels::get_all_labels,
             // Payment Request commands (Milestone 6)
             commands::payment_requests::create_payment_request,
             commands::payment_requests::list_payment_requests,

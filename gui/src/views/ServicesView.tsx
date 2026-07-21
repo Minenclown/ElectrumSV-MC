@@ -71,15 +71,95 @@ function ResultBox({ data, error }: { data: any; error: string | null }) {
 
 // ─── SPV Channels section ──────────────────────────────────────────────
 
+type SpvMessage = {
+  message_id: string;
+  channel_id: string;
+  encrypted_payload: string;
+  received: number;
+  read: boolean;
+};
+
+function truncateId(id: string, max = 16): string {
+  if (id.length <= max) return id;
+  return `${id.slice(0, max)}…`;
+}
+
+function truncatePayload(payload: string, max = 40): string {
+  if (!payload) return '';
+  if (payload.length <= max) return payload;
+  return `${payload.slice(0, max)}...`;
+}
+
+function formatReceived(ts: number): string {
+  if (!ts) return '—';
+  // received is a unix timestamp (seconds or ms); normalise to ms.
+  const ms = ts > 1e12 ? ts : ts * 1000;
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return String(ts);
+  return d.toLocaleString();
+}
+
+function ReadBadge({ read }: { read: boolean }) {
+  return (
+    <span
+      className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+        read ? 'bg-success/15 text-success' : 'bg-accent/15 text-accent'
+      }`}
+    >
+      {read ? 'Read' : 'Unread'}
+    </span>
+  );
+}
+
+function MessageCard({
+  msg,
+  busy,
+  onMarkRead,
+}: {
+  msg: SpvMessage;
+  busy: boolean;
+  onMarkRead: (id: string) => void;
+}) {
+  return (
+    <div className="bg-void-800 rounded-lg p-3 border border-void-700 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-[10px] text-gray-400 font-mono shrink-0">id</span>
+          <span className="text-xs text-gray-100 font-mono truncate" title={msg.message_id}>
+            {truncateId(msg.message_id)}
+          </span>
+        </div>
+        <ReadBadge read={msg.read} />
+      </div>
+      <div className="flex items-center gap-2 text-xs text-gray-400">
+        <span className="shrink-0">received</span>
+        <span className="text-gray-100">{formatReceived(msg.received)}</span>
+      </div>
+      <div className="min-w-0">
+        <span className="text-[10px] text-gray-400 font-mono">encrypted_payload</span>
+        <pre className="mt-0.5 text-xs text-gray-300 font-mono whitespace-pre-wrap break-all bg-void-950 p-2 rounded border border-void-700">
+          {truncatePayload(msg.encrypted_payload)}
+        </pre>
+      </div>
+      {!msg.read && (
+        <Button onClick={() => onMarkRead(msg.message_id)} disabled={busy} variant="secondary">
+          Mark Read
+        </Button>
+      )}
+    </div>
+  );
+}
+
 function SpvChannelsSection() {
   const [baseUrl, setBaseUrl] = useState('https://channels.example.com');
   const [publicKey, setPublicKey] = useState('');
   const [channelId, setChannelId] = useState('');
   const [encryptedPayload, setEncryptedPayload] = useState('');
-  const [messageId, setMessageId] = useState('');
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [messages, setMessages] = useState<SpvMessage[] | null>(null);
+  const [msgBusyId, setMsgBusyId] = useState<string | null>(null);
 
   const run = async (fn: () => Promise<any>) => {
     setBusy(true);
@@ -94,6 +174,39 @@ function SpvChannelsSection() {
       setBusy(false);
     }
   };
+
+  const listMessages = async () => {
+    if (!channelId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await api.spvListMessages(baseUrl, channelId);
+      setMessages(Array.isArray(r) ? r : []);
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+      setMessages(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const markRead = async (id: string) => {
+    setMsgBusyId(id);
+    setError(null);
+    try {
+      await api.spvMarkRead(baseUrl, channelId, id);
+      // optimistically flip local state
+      setMessages((prev) =>
+        prev ? prev.map((m) => (m.message_id === id ? { ...m, read: true } : m)) : prev,
+      );
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+    } finally {
+      setMsgBusyId(null);
+    }
+  };
+
+  const unreadCount = messages ? messages.filter((m) => !m.read).length : 0;
 
   return (
     <div className="space-y-4">
@@ -113,14 +226,14 @@ function SpvChannelsSection() {
         </div>
       </Section>
 
-      <Section title="List / Send / Mark Read / Delete">
+      <Section title="Channel — List / Send / Delete">
         <div className="grid grid-cols-1 gap-3">
           <div>
             <Label text="Channel ID" />
             <Input value={channelId} onChange={(e) => setChannelId(e.target.value)} />
           </div>
           <div className="flex gap-2 flex-wrap">
-            <Button onClick={() => run(() => api.spvListMessages(baseUrl, channelId))} disabled={busy || !channelId} variant="secondary">
+            <Button onClick={listMessages} disabled={busy || !channelId} variant="secondary">
               List Messages
             </Button>
             <Button onClick={() => run(() => api.spvDeleteChannel(baseUrl, channelId))} disabled={busy || !channelId} variant="danger">
@@ -134,15 +247,42 @@ function SpvChannelsSection() {
           <Button onClick={() => run(() => api.spvPostMessage(baseUrl, channelId, encryptedPayload))} disabled={busy || !channelId || !encryptedPayload}>
             Post Message
           </Button>
-          <div>
-            <Label text="Message ID (to mark read)" />
-            <Input value={messageId} onChange={(e) => setMessageId(e.target.value)} />
-          </div>
-          <Button onClick={() => run(() => api.spvMarkRead(baseUrl, channelId, messageId))} disabled={busy || !channelId || !messageId} variant="secondary">
-            Mark Read
-          </Button>
         </div>
       </Section>
+
+      {messages !== null && (
+        <Section title="Messages">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-400">
+                {messages.length} message{messages.length === 1 ? '' : 's'}
+              </span>
+              {unreadCount > 0 && (
+                <span className="inline-flex items-center rounded-full bg-accent/20 text-accent text-[10px] font-bold px-2 py-0.5">
+                  {unreadCount} unread
+                </span>
+              )}
+            </div>
+            <Button onClick={listMessages} disabled={busy || !channelId} variant="secondary">
+              Refresh
+            </Button>
+          </div>
+          {messages.length === 0 ? (
+            <div className="text-xs text-gray-400">No messages in this channel.</div>
+          ) : (
+            <div className="space-y-2">
+              {messages.map((m) => (
+                <MessageCard
+                  key={m.message_id}
+                  msg={m}
+                  busy={msgBusyId === m.message_id || busy}
+                  onMarkRead={markRead}
+                />
+              ))}
+            </div>
+          )}
+        </Section>
+      )}
 
       <ResultBox data={result} error={error} />
     </div>
@@ -150,6 +290,130 @@ function SpvChannelsSection() {
 }
 
 // ─── Cosigner Pool section ─────────────────────────────────────────────
+
+/** Shape of a pending cosigner-pool TX (matches cosignerGetPending return). */
+interface PendingTx {
+  wallet_id: string;
+  txid: string;
+  tx_hex: string;
+  signers: string[];
+  required_sigs: number;
+  total_cosigners: number;
+}
+
+/** Truncate a txid (64 hex chars) to a short form: first 8 + … + last 6. */
+function shortTxid(txid: string): string {
+  if (!txid || txid.length <= 16) return txid;
+  return `${txid.slice(0, 8)}…${txid.slice(-6)}`;
+}
+
+/** Progress badge for signing state. */
+function SignProgress({ tx }: { tx: PendingTx }) {
+  const signed = tx.signers.length;
+  const needed = tx.required_sigs;
+  const complete = signed >= needed;
+  return (
+    <span
+      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+        complete
+          ? 'bg-success/15 text-success border border-success/30'
+          : 'bg-void-800 text-gray-400 border border-void-700'
+      }`}
+      title={complete ? 'All required signatures collected' : `${signed} of ${needed} required signatures`}
+    >
+      {complete ? '✓ Complete' : `Pending (${signed}/${needed} signed)`}
+    </span>
+  );
+}
+
+/** Card for a single pending TX with action buttons. */
+function PendingTxCard({
+  tx,
+  baseUrl,
+  walletId,
+  onSignLocal,
+  onDelete,
+  busy,
+  signResult,
+  signError,
+}: {
+  tx: PendingTx;
+  baseUrl: string;
+  walletId: string;
+  onSignLocal: (tx: PendingTx) => void;
+  onDelete: (tx: PendingTx) => void;
+  busy: boolean;
+  signResult: { txid: string; signed_tx_hex: string } | null;
+  signError: string | null;
+}) {
+  const signed = tx.signers.length;
+  const total = tx.total_cosigners;
+  return (
+    <div className="bg-void-800 rounded-lg p-3 border border-void-700 space-y-2">
+      {/* Header row */}
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="font-mono text-sm text-gray-100" title={tx.txid}>
+          {shortTxid(tx.txid)}
+        </div>
+        <SignProgress tx={tx} />
+      </div>
+
+      {/* Stats grid */}
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-gray-400">
+        <div>
+          <span className="text-gray-500">Signers:</span>{' '}
+          <span className="text-gray-100">{signed}/{total}</span>
+        </div>
+        <div>
+          <span className="text-gray-500">Required:</span>{' '}
+          <span className="text-gray-100">{tx.required_sigs}</span>
+        </div>
+        <div>
+          <span className="text-gray-500">Cosigners:</span>{' '}
+          <span className="text-gray-100">{tx.total_cosigners}</span>
+        </div>
+        <div>
+          <span className="text-gray-500">Wallet:</span>{' '}
+          <span className="text-gray-100">{tx.wallet_id}</span>
+        </div>
+      </div>
+
+      {/* Signer list */}
+      {tx.signers.length > 0 && (
+        <div className="text-xs text-gray-400">
+          <span className="text-gray-500">Signed by:</span> {tx.signers.join(', ')}
+        </div>
+      )}
+
+      {/* Action buttons */}
+      <div className="flex gap-2 flex-wrap pt-1">
+        <Button onClick={() => onSignLocal(tx)} disabled={busy} variant="primary">
+          Sign Locally
+        </Button>
+        <Button onClick={() => onDelete(tx)} disabled={busy} variant="danger">
+          Delete
+        </Button>
+      </div>
+
+      {/* Caveat note */}
+      <div className="text-xs text-gray-500 italic">
+        Note: "Sign Locally" uses the txid as a placeholder <code className="text-gray-400">plan_id</code>.
+        This requires a prepared TX plan (from <code className="text-gray-400">prepare_tx</code>); a real
+        plan_id must be supplied for the backend command to succeed.
+      </div>
+
+      {/* Per-card sign result */}
+      {signResult && signResult.txid === tx.txid && (
+        <div className="text-xs text-success bg-success/10 rounded p-2 break-all">
+          Signed TX: {signResult.signed_tx_hex.slice(0, 64)}…
+        </div>
+      )}
+      {signError && (
+        <div className="text-xs text-danger bg-danger/10 rounded p-2 break-all">{signError}</div>
+      )}
+    </div>
+  );
+}
 
 function CosignerPoolSection() {
   const [baseUrl, setBaseUrl] = useState('https://pool.example.com');
@@ -162,6 +426,13 @@ function CosignerPoolSection() {
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // Pending-TX state
+  const [pendingTxes, setPendingTxes] = useState<PendingTx[]>([]);
+  const [signResultMap, setSignResultMap] = useState<Record<string, { txid: string; signed_tx_hex: string } | null>>({});
+  const [signErrorMap, setSignErrorMap] = useState<Record<string, string | null>>({});
+  const [signBusyTxid, setSignBusyTxid] = useState<string | null>(null);
+  const [deleteBusyTxid, setDeleteBusyTxid] = useState<string | null>(null);
 
   const run = async (fn: () => Promise<any>) => {
     setBusy(true);
@@ -177,6 +448,54 @@ function CosignerPoolSection() {
     }
   };
 
+  /** Get pending and populate the card list. */
+  const fetchPending = async () => {
+    setBusy(true);
+    setError(null);
+    setResult(null);
+    setPendingTxes([]);
+    try {
+      const r = await api.cosignerGetPending(baseUrl, walletId);
+      setPendingTxes(r ?? []);
+      setResult(r ?? 'No pending transactions');
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Sign a pending TX locally via sign_multisig_tx.
+   *  Uses txid as placeholder plan_id; localKeyIndex defaults to 0. */
+  const signLocal = async (tx: PendingTx) => {
+    setSignBusyTxid(tx.txid);
+    setSignResultMap((m) => ({ ...m, [tx.txid]: null }));
+    setSignErrorMap((m) => ({ ...m, [tx.txid]: null }));
+    try {
+      // Placeholder: real flow needs a plan_id from prepare_tx.
+      const r = await api.signMultisigTx(tx.txid, '', 0);
+      setSignResultMap((m) => ({ ...m, [tx.txid]: r }));
+    } catch (e: any) {
+      setSignErrorMap((m) => ({ ...m, [tx.txid]: e?.message ?? String(e) }));
+    } finally {
+      setSignBusyTxid(null);
+    }
+  };
+
+  /** Delete a pending TX from the pool, then refresh the list. */
+  const deleteTx = async (tx: PendingTx) => {
+    setDeleteBusyTxid(tx.txid);
+    try {
+      await api.cosignerDeleteTx(baseUrl, walletId, tx.txid);
+      setPendingTxes((prev) => prev.filter((p) => p.txid !== tx.txid));
+      setResult(`Deleted ${tx.txid}`);
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+    } finally {
+      setDeleteBusyTxid(null);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <Section title="Pending Transactions">
@@ -189,11 +508,32 @@ function CosignerPoolSection() {
             <Label text="Wallet ID" />
             <Input value={walletId} onChange={(e) => setWalletId(e.target.value)} />
           </div>
-          <Button onClick={() => run(() => api.cosignerGetPending(baseUrl, walletId))} disabled={busy || !walletId} variant="secondary">
+          <Button onClick={fetchPending} disabled={busy || !walletId} variant="secondary">
             Get Pending
           </Button>
         </div>
       </Section>
+
+      {/* Pending TX card list */}
+      {pendingTxes.length > 0 && (
+        <Section title={`Pending TXs (${pendingTxes.length})`}>
+          <div className="space-y-3">
+            {pendingTxes.map((tx) => (
+              <PendingTxCard
+                key={tx.txid}
+                tx={tx}
+                baseUrl={baseUrl}
+                walletId={walletId}
+                onSignLocal={signLocal}
+                onDelete={deleteTx}
+                busy={signBusyTxid === tx.txid || deleteBusyTxid === tx.txid}
+                signResult={signResultMap[tx.txid] ?? null}
+                signError={signErrorMap[tx.txid] ?? null}
+              />
+            ))}
+          </div>
+        </Section>
+      )}
 
       <Section title="Submit Partially Signed TX">
         <div className="grid grid-cols-1 gap-3">
@@ -248,9 +588,6 @@ function CosignerPoolSection() {
           >
             Submit TX
           </Button>
-          <Button onClick={() => run(() => api.cosignerDeleteTx(baseUrl, walletId, txid))} disabled={busy || !walletId || !txid} variant="danger">
-            Delete TX
-          </Button>
         </div>
       </Section>
 
@@ -270,7 +607,7 @@ function LabelSyncSection() {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string>('');
 
-  const run = async (fn: () => Promise<any>, okMsg: string) => {
+  const run = async (fn: () => Promise<any>, okMsg: string | ((r: any) => string)) => {
     setBusy(true);
     setError(null);
     setResult(null);
@@ -278,7 +615,7 @@ function LabelSyncSection() {
     try {
       const r = await fn();
       setResult(r ?? 'OK');
-      setStatus(okMsg);
+      setStatus(typeof okMsg === 'function' ? okMsg(r) : okMsg);
     } catch (e: any) {
       setError(e?.message ?? String(e));
     } finally {
@@ -304,7 +641,14 @@ function LabelSyncSection() {
           </div>
           <div className="flex gap-2 flex-wrap">
             <Button
-              onClick={() => run(() => api.labelSyncPush(baseUrl, walletId, passphrase, []), 'Pushed 0 labels (overwrite)')}
+              onClick={() => run(
+                async () => {
+                  const labels = await api.getAllLabels();
+                  await api.labelSyncPush(baseUrl, walletId, passphrase, labels);
+                  return labels.length;
+                },
+                (count: number) => `Pushed ${count} labels (overwrite)`,
+              )}
               disabled={busy || !walletId || !passphrase}
             >
               Push Labels
