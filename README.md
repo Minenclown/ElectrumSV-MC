@@ -147,7 +147,8 @@ scannable by decoding them back with rqrr:
 # Clone and run
 git clone git@github.com:Minenclown/ElectrumSV-MC.git
 cd ElectrumSV-MC
-./start.sh
+./start.sh          # Linux/macOS
+.\start.ps1         # Windows (PowerShell)
 
 # Or manually:
 cd gui && npm install
@@ -162,6 +163,16 @@ cd src-tauri && cargo tauri build
 # With qrcode-fallback backend (for maximum scanner compatibility):
 cd src-tauri && cargo tauri build --features qrcode-fallback
 ```
+
+### Cross-Platform Notes
+
+The wallet runs on **Linux**, **macOS**, and **Windows**:
+
+- **TLS**: Uses `rustls` (pure Rust, no OpenSSL dependency) — cross-platform out of the box.
+- **File paths**: All filesystem paths use `std::path::PathBuf` for OS-native separators.
+- **Data directory**: Falls back to `%APPDATA%` on Windows, `$HOME` on Unix.
+- **Dev script**: `start.sh` (bash) for Linux/macOS, `start.ps1` (PowerShell) for Windows.
+- **No shell commands**: The Rust backend never shells out to `bash`/`cmd`.
 
 ---
 

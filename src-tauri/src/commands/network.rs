@@ -668,7 +668,10 @@ async fn ensure_header_store(state: &State<'_, AppState>) -> Result<(), String> 
         net.header_store.is_none()
     };
     if needs_init {
-        let db_path = format!("{}/headers.sqlite", state.data_dir);
+        let db_path = std::path::PathBuf::from(&state.data_dir)
+            .join("headers.sqlite")
+            .to_string_lossy()
+            .to_string();
         let store = HeaderStore::open(&db_path)
             .await
             .map_err(|e| format!("failed to open header store: {e}"))?;

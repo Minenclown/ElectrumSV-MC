@@ -135,8 +135,15 @@ impl Default for NetworkState {
 impl AppState {
     pub fn new() -> Self {
         let data_dir = std::env::var("ELECTRUMSV_DATA_DIR").unwrap_or_else(|_| {
-            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-            format!("{}/.electrum-sv", home)
+            // Cross-platform fallback: use APPDATA on Windows, HOME on Unix.
+            // Falls back to current dir if neither is set.
+            let base = std::env::var("APPDATA")
+                .or_else(|_| std::env::var("HOME"))
+                .unwrap_or_else(|_| ".".to_string());
+            std::path::PathBuf::from(base)
+                .join(".electrum-sv")
+                .to_string_lossy()
+                .to_string()
         });
 
         log::info!("Data directory: {}", data_dir);

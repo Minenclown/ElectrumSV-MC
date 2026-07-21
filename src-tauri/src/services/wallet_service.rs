@@ -9,7 +9,17 @@ use crate::core::{keystore, mnemonic};
 use crate::db::{connection, repositories};
 use crate::security::encryption;
 use crate::state::{ActiveWallet, AppState};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+/// Join a directory and filename into a cross-platform path string.
+/// Uses std::path::PathBuf so the OS-native separator is applied
+/// (/ on Unix, \ on Windows).
+fn join_path(dir: &str, filename: &str) -> String {
+    PathBuf::from(dir)
+        .join(filename)
+        .to_string_lossy()
+        .to_string()
+}
 
 /// Result of creating a new wallet.
 #[derive(Debug, serde::Serialize)]
@@ -99,7 +109,7 @@ pub async fn create_wallet(
     } else {
         name
     };
-    let wallet_path = format!("{}/{}.sqlite", state.data_dir, name);
+    let wallet_path = join_path(&state.data_dir, &format!("{}.sqlite", name));
 
     if Path::new(&wallet_path).exists() {
         return Err(WalletError::WalletAlreadyExists(wallet_path));
@@ -443,7 +453,7 @@ mod tests {
         assert!(!status.is_open);
 
         // Open it
-        let wallet_path = format!("{}/test_open.sqlite", state.data_dir);
+        let wallet_path = join_path(&state.data_dir, "test_open.sqlite");
         let result = open_wallet(&state, &wallet_path).await.unwrap();
         assert!(!result.is_unlocked);
 
@@ -462,7 +472,7 @@ mod tests {
             .unwrap();
         close_wallet(&state).unwrap();
 
-        let wallet_path = format!("{}/test_unlock.sqlite", state.data_dir);
+        let wallet_path = join_path(&state.data_dir, "test_unlock.sqlite");
         open_wallet(&state, &wallet_path).await.unwrap();
 
         // Should be locked
@@ -486,7 +496,7 @@ mod tests {
             .unwrap();
         close_wallet(&state).unwrap();
 
-        let wallet_path = format!("{}/test_wrong_pw.sqlite", state.data_dir);
+        let wallet_path = join_path(&state.data_dir, "test_wrong_pw.sqlite");
         open_wallet(&state, &wallet_path).await.unwrap();
 
         let result = unlock_wallet(&state, "wrong_password");
@@ -515,7 +525,7 @@ mod tests {
         assert!(!get_wallet_status(&state).is_open);
 
         // 3. Open
-        let wallet_path = format!("{}/test_lifecycle.sqlite", state.data_dir);
+        let wallet_path = join_path(&state.data_dir, "test_lifecycle.sqlite");
         open_wallet(&state, &wallet_path).await.unwrap();
         assert!(get_wallet_status(&state).is_open);
         assert!(!get_wallet_status(&state).is_unlocked);
