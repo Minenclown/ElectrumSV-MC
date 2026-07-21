@@ -7,8 +7,9 @@ import { useStore } from '../store';
 import { api } from '../api';
 import { useTranslation, interp } from '../i18n';
 
-type Mode = 'login' | 'create';
+type Mode = 'login' | 'create' | 'restore';
 type CreateStep = 'form' | 'mnemonic' | 'confirm';
+type RestoreMethod = 'mnemonic' | 'wif' | null;
 
 export function LoginScreen() {
   const { setAuthenticated, setWalletInfo, setAccounts, setActiveAccount,
@@ -28,6 +29,12 @@ export function LoginScreen() {
   const [createStep, setCreateStep] = useState<CreateStep>('form');
   const [mnemonic, setMnemonic] = useState<string | null>(null);
   const [confirmInput, setConfirmInput] = useState('');
+
+  // Restore state
+  const [restoreMethod, setRestoreMethod] = useState<RestoreMethod>(null);
+  const [restoreInput, setRestoreInput] = useState('');
+  const [restoreName, setRestoreName] = useState('');
+  const [restorePassword, setRestorePassword] = useState('');
 
   // In Tauri mode, the backend is always available (same process)
   const hasToken = true;
@@ -150,8 +157,88 @@ export function LoginScreen() {
     setTotpRequired(false);
     setTotpCode('');
     setTotpChecked(false);
+    setRestoreMethod(null);
+    setRestoreInput('');
+    setRestoreName('');
+    setRestorePassword('');
     setView('landing');
   };
+
+  const handleRestore = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const name = restoreName.trim() || 'restored_wallet';
+      if (restoreMethod === 'mnemonic') {
+        const result = await api.createWallet(restorePassword, name, restoreInput.trim());
+        setActiveWalletPath(result.wallet_path);
+        // Skip mnemonic display/confirm for restored wallets
+        await loadWalletInfo();
+      } else if (restoreMethod === 'wif') {
+        // WIF import: create a new wallet, then import the key
+        const result = await api.createWallet(restorePassword, name);
+        setActiveWalletPath(result.wallet_path);
+        await api.importPrivkey(restoreInput.trim(), restorePassword);
+        await loadWalletInfo();
+      }
+    } catch (e: any) {
+      setError(e.message || t.login.restoreInvalidMnemonic);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Restoration is a separate page. Sensitive values are entered only here,
+  // never in the wallet selector/login screen.
+  if (mode === 'restore') {
+    const canRestore = Boolean(
+      restoreMethod && restoreInput.trim() && restoreName.trim() && restorePassword.length >= 4,
+    );
+
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-void-950 px-4 py-8">
+        <div className="w-full max-w-lg">
+          <div className="text-center mb-6">
+            <div className="text-3xl font-bold text-accent mb-2">{t.login.restoreTitle}</div>
+            <div className="text-sm text-gray-400">{t.login.restoreDesc}</div>
+          </div>
+          <div className="bg-void-900 rounded-xl p-6 border border-void-700">
+            {!restoreMethod ? (
+              <div className="space-y-3">
+                <button onClick={() => setRestoreMethod('mnemonic')} className="w-full text-left rounded-lg border border-void-700 bg-void-800 hover:border-accent px-4 py-3 transition-colors">
+                  <div className="text-sm font-medium text-gray-100">{t.login.restoreMnemonic}</div>
+                  <div className="text-xs text-gray-400 mt-1">{t.login.restoreMnemonicDesc}</div>
+                </button>
+                <button onClick={() => setRestoreMethod('wif')} className="w-full text-left rounded-lg border border-void-700 bg-void-800 hover:border-accent px-4 py-3 transition-colors">
+                  <div className="text-sm font-medium text-gray-100">{t.login.restoreWif}</div>
+                  <div className="text-xs text-gray-400 mt-1">{t.login.restoreWifDesc}</div>
+                </button>
+              </div>
+            ) : (
+              <>
+                <button onClick={() => { setRestoreMethod(null); setRestoreInput(''); setError(null); }} className="text-xs text-gray-400 hover:text-gray-100 mb-4 transition-colors">
+                  ← {t.login.restoreDesc}
+                </button>
+                <label className="block text-xs text-gray-400 mb-1">{t.login.restoreNameLabel}</label>
+                <input type="text" value={restoreName} onChange={(e) => setRestoreName(e.target.value)} placeholder="restored_wallet" className="w-full bg-void-800 border border-void-700 rounded-lg px-3 py-2 text-sm text-gray-100 focus:border-accent outline-none mb-3" />
+                <label className="block text-xs text-gray-400 mb-1">{restoreMethod === 'mnemonic' ? t.login.restoreMnemonic : t.login.restoreWif}</label>
+                <textarea value={restoreInput} onChange={(e) => setRestoreInput(e.target.value)} placeholder={restoreMethod === 'mnemonic' ? t.login.restoreMnemonicPlaceholder : t.login.restoreWifPlaceholder} className="w-full h-24 bg-void-800 border border-void-700 rounded-lg px-3 py-2 text-sm text-gray-100 font-mono focus:border-accent outline-none mb-3 resize-none" autoFocus spellCheck={false} />
+                <label className="block text-xs text-gray-400 mb-1">{t.login.restorePasswordLabel}</label>
+                <input type="password" value={restorePassword} onChange={(e) => setRestorePassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && canRestore && handleRestore()} className="w-full bg-void-800 border border-void-700 rounded-lg px-3 py-2 text-sm text-gray-100 focus:border-accent outline-none mb-4" />
+                <button onClick={handleRestore} disabled={loading || !canRestore} className="w-full bg-accent hover:bg-accent-hover text-white rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+                  {loading ? t.login.restoring : t.login.restoreButton}
+                </button>
+              </>
+            )}
+            {error && <div className="text-sm text-danger mt-3">{error}</div>}
+          </div>
+          <button onClick={() => { setRestoreMethod(null); setRestoreInput(''); setError(null); setMode(selectedWallet ? 'login' : 'create'); }} className="w-full text-center text-xs text-gray-400 hover:text-gray-100 mt-4 transition-colors">
+            {t.login.restoreCancel}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // Mnemonic display step
   if (mode === 'create' && createStep === 'mnemonic' && mnemonic) {
@@ -357,6 +444,13 @@ export function LoginScreen() {
               </button>
             </>
           )}
+
+          <button
+            onClick={() => { setMode('restore'); setRestoreMethod(null); setError(null); }}
+            className="w-full mt-4 rounded-md border border-void-700 bg-void-950/60 px-3 py-2 text-xs text-gray-400 hover:border-accent hover:text-accent transition-colors"
+          >
+            {t.login.restoreWallet}
+          </button>
 
           {error && <div className="text-sm text-danger mt-3">{error}</div>}
         </div>
