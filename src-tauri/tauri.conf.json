@@ -1,0 +1,42 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "ElectrumSV-Mc",
+  "version": "0.1.0",
+  "identifier": "com.electrumsv.mc",
+  "build": {
+    "beforeDevCommand": "cd /var/home/RaSt/OpenCode/electrumsv-mc/gui && npm run dev",
+    "beforeBuildCommand": "cd /var/home/RaSt/OpenCode/electrumsv-mc/gui && npm run build",
+    "devUrl": "http://localhost:5174",
+    "frontendDist": "/var/home/RaSt/OpenCode/electrumsv-mc/gui/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "ElectrumSV-Mc",
+        "width": 1024,
+        "height": 768,
+        "minWidth": 800,
+        "minHeight": 600,
+        "resizable": true,
+        "fullscreen": false,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["deb", "rpm"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png"
+    ],
+    "category": "Finance",
+    "shortDescription": "Lightweight BSV wallet",
+    "longDescription": "ElectrumSV-Mc — A lightweight, secure Bitcoin SV wallet with TOTP protection, SPV verification, and hardware wallet support."
+  }
+}

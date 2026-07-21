@@ -1,0 +1,13 @@
+# Wallet data (standalone mode)
+data/
+
+# Rust build
+src-tauri/target/
+
+# GUI
+gui/node_modules/
+gui/dist/
+
+# IDE
+.idea/
+.vscode/

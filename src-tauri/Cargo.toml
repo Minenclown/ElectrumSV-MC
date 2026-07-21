@@ -1,0 +1,82 @@
+[package]
+name = "electrumsv-mc"
+version = "0.1.0"
+description = "ElectrumSV-Mc — A lightweight BSV wallet"
+edition = "2021"
+
+[lib]
+name = "electrumsv_mc_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.0", features = [] }
+
+[dependencies]
+# Tauri
+tauri = { version = "2.0", features = [] }
+tauri-plugin-shell = "2.0"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# SQLite (async)
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "macros"] }
+
+# Error handling
+anyhow = "1"
+thiserror = "2"
+
+# Logging
+log = "0.4"
+env_logger = "0.11"
+
+# Utilities
+hex = "0.4"
+bs58 = "0.5"
+chrono = { version = "0.4", features = ["serde"] }
+rand = "0.8"
+
+# BSV SDK (activated in Milestone 2)
+bsv-sdk = { version = "0.3", features = ["serde"] }
+# bsv-wallet-toolbox-rs = "0.3"  -- from later milestones
+
+# Security — AES-CBC for wallet encryption (compatible with Python pw_encode/pw_decode)
+aes = "0.8"
+cbc = { version = "0.1", features = ["alloc"] }
+pbkdf2 = "0.12"
+sha2 = "0.10"
+base64 = "0.22"
+# TOTP — RFC 6238 Time-based One-Time Password (Milestone 5)
+totp-rs = { version = "5", features = ["gen_secret", "otpauth"] }
+
+# Network (Milestone 4) — ElectrumX TCP+TLS client + WhatsOnChain REST
+tokio-rustls = "0.26"
+rustls = "0.23"
+rustls-pemfile = "2"
+webpki-roots = "0.26"
+url = "2"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+
+# Async trait support for NetworkBackend trait
+async-trait = "0.1"
+
+# QR-Code — PicQr (standalone, ISO/IEC 18004, no external QR libs)
+picqr = { path = "../../picqr", default-features = false, features = ["svg"] }
+
+[features]
+default = []
+# Hardware-wallet support — compile-time gate for HW-signer code paths.
+# Runtime toggle is `hardware_wallet_enabled` in WalletData DB.
+# Murena-Prinzip: Feature is OFF by default, can be enabled at build time.
+hardware-wallet = []
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+codegen-units = 1
+panic = "abort"
