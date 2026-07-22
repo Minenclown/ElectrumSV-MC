@@ -91,9 +91,6 @@ export function LoginScreen() {
       useStore.getState().setView('main');
     } catch (e: any) {
       setError(e.message || t.login.loginFailed);
-      if (selectedWallet) {
-        setMode('create');
-      }
     } finally {
       setLoading(false);
     }

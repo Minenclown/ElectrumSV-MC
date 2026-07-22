@@ -258,9 +258,9 @@ pub fn mn_decode(wlist: &[&str]) -> Result<String, LegacyMnemonicError> {
 
     let mut out = String::with_capacity(wlist.len() / 3 * 8);
     for chunk in wlist.chunks(3) {
-        let w1 = word_index(chunk[0])?;
-        let w2 = word_index(chunk[1])?;
-        let w3 = word_index(chunk[2])?;
+        let w1 = word_index(&chunk[0].to_lowercase())?;
+        let w2 = word_index(&chunk[1].to_lowercase())?;
+        let w3 = word_index(&chunk[2].to_lowercase())?;
 
         let n = N as i128;
         let x = (w1 as i128)

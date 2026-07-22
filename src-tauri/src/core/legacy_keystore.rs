@@ -182,8 +182,11 @@ pub fn is_legacy_seed(words: &str) -> bool {
     }
 
     // Try legacy mn_decode: word count must be 12 or 24, and mn_decode must succeed
+    // Case-insensitive: lowercase all words before lookup
+    let lower_words: Vec<String> = word_list.iter().map(|w| w.to_lowercase()).collect();
+    let lower_refs: Vec<&str> = lower_words.iter().map(|s| s.as_str()).collect();
     let uses_electrum_words = (word_list.len() == 12 || word_list.len() == 24)
-        && legacy_mnemonic::mn_decode(&word_list).is_ok();
+        && legacy_mnemonic::mn_decode(&lower_refs).is_ok();
 
     uses_electrum_words
 }
@@ -202,12 +205,14 @@ pub fn decode_legacy_seed(seed_words: &str) -> Result<String, String> {
         }
     }
 
-    // Try legacy mn_decode
+    // Try legacy mn_decode (case-insensitive)
     let word_list: Vec<&str> = trimmed.split_whitespace().collect();
     if word_list.is_empty() {
         return Err("empty seed string".to_string());
     }
-    let hex_seed = legacy_mnemonic::mn_decode(&word_list)
+    let lower_words: Vec<String> = word_list.iter().map(|w| w.to_lowercase()).collect();
+    let lower_refs: Vec<&str> = lower_words.iter().map(|s| s.as_str()).collect();
+    let hex_seed = legacy_mnemonic::mn_decode(&lower_refs)
         .map_err(|e| format!("legacy mn_decode failed: {}", e))?;
     Ok(hex_seed)
 }

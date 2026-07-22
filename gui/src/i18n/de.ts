@@ -82,7 +82,7 @@ export const de: Translations = {
     restoreCancel: 'Abbrechen',
     legacyToggle: 'Legacy ElectrumSV (1.3.x)',
     legacyWarningTitle: 'Legacy-Wallet Migration',
-    legacyWarningBody: 'Sie stellen eine Legacy ElectrumSV-Wallet wiederher. Ihre alten Schluessel werden in eine neue BIP39-Wallet migriert. Alle Guthaben werden automatisch auf neue Adressen uebertragen. Nach der Migration MUeSSEN Sie Ihre neue Mnemonic-Seed sichern (Backup). Dieser Vorgang kann einen Moment dauern.',
+    legacyWarningBody: 'Sie stellen eine Legacy ElectrumSV-Wallet wiederher. Ihre alten Schluessel werden in eine neue BIP39-Wallet migriert. Alle Guthaben werden automatisch auf neue Adressen uebertragen. Nach der Migration MÜSSEN Sie Ihre neue Mnemonic-Seed sichern (Backup). Dieser Vorgang kann einen Moment dauern.',
     legacyMigrate: 'Migrieren & Weiter',
     legacyMigrating: 'Wallet wird migriert...',
     legacyMigrationDone: 'Migration abgeschlossen! Ihre neue Mnemonic wird unten angezeigt. Sichern Sie diese sofort.',

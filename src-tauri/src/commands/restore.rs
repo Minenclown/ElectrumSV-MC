@@ -47,6 +47,14 @@ pub struct SweepResult {
 }
 
 /// Restore a legacy ElectrumSV wallet and migrate it to a new BIP39/BIP32 wallet.
+///
+/// Steps:
+/// 1. Validate and decode the legacy seed
+/// 2. Derive the MPK (master public key) from the legacy seed
+/// 3. Create a new BIP39/BIP32 wallet (with a fresh random mnemonic)
+/// 4. Import the legacy private keys into the new wallet as IMPORTED_PRIVATE_KEY entries
+///    so the user can spend from both the new BIP32 addresses and the old legacy addresses.
+/// 5. Return the new mnemonic and wallet path
 #[tauri::command]
 pub async fn restore_legacy_wallet(
     state: State<'_, AppState>,
@@ -75,7 +83,7 @@ pub async fn restore_legacy_wallet(
         .map_err(|e| format!("failed to derive MPK: {}", e))?;
     log::info!("restore_legacy_wallet — derived MPK ({} chars)", mpk.len());
 
-    // Step 3 & 4: Generate new BIP39 mnemonic and create new BIP32 wallet
+    // Step 3: Generate new BIP39 mnemonic and create new BIP32 wallet
     let create_result = wallet_service::create_wallet(
         &state,
         &wallet_name,
@@ -88,11 +96,92 @@ pub async fn restore_legacy_wallet(
 
     log::info!("restore_legacy_wallet — new wallet created at {}", create_result.wallet_path);
 
+    // Step 4: Import legacy private keys into the new wallet
+    // The new wallet is already open and unlocked after create_wallet.
+    let (pool, account_id) = {
+        let guard = state.active_wallet.lock().unwrap();
+        let active = guard.as_ref().ok_or("no wallet is currently open")?;
+        (active.db_pool.clone(), active.account_id)
+    };
+
+    let mk_row = crate::db::repositories::get_first_master_key(&pool)
+        .await
+        .map_err(|e| format!("failed to get master key: {}", e))?;
+    let masterkey_id = mk_row.map(|mk| mk.masterkey_id);
+
+    let mut imported_count: u32 = 0;
+    for change in 0..=1u32 {
+        for index in 0..GAP_LIMIT {
+            // Derive the legacy private key for this (change, index)
+            let priv_bytes = match legacy_keystore::derive_private_key(&hex_seed, &mpk, change, index) {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    log::warn!("restore_legacy_wallet — failed to derive privkey at {}/{}: {}", change, index, e);
+                    continue;
+                }
+            };
+
+            let priv_key = match PrivateKey::from_bytes(&priv_bytes) {
+                Ok(pk) => pk,
+                Err(e) => {
+                    log::warn!("restore_legacy_wallet — invalid private key at {}/{}: {}", change, index, e);
+                    continue;
+                }
+            };
+
+            // Get the legacy address (uncompressed pubkey P2PKH)
+            let pubkey = priv_key.to_public_key();
+            let address = legacy_keystore::pubkey_to_p2pkh_address_uncompressed(&pubkey);
+
+            // Convert private key to WIF for storage (encrypted with password)
+            let wif = priv_key.to_wif(&[0x80]);
+
+            // Store as imported key (derivation_type = IMPORTED_PRIVATE_KEY = 1)
+            let derivation_data = serde_json::json!({
+                "type": "imported_privkey",
+                "wif_encrypted": crate::security::encryption::pw_encode(&wif, &password),
+                "legacy_change": change,
+                "legacy_index": index,
+                "legacy_address": address,
+            })
+            .to_string()
+            .into_bytes();
+
+            let description = format!("Legacy ElectrumSV key {}/{}", change, index);
+
+            if let Err(e) = crate::db::repositories::insert_keyinstance(
+                &pool,
+                account_id,
+                masterkey_id,
+                1, // DerivationType::IMPORTED_PRIVATE_KEY
+                &derivation_data,
+                crate::db::repositories::script_type::P2PKH,
+                0,
+                Some(&description),
+            )
+            .await
+            {
+                log::warn!("restore_legacy_wallet — failed to insert keyinstance at {}/{}: {}", change, index, e);
+                continue;
+            }
+
+            imported_count += 1;
+        }
+    }
+
+    log::info!(
+        "restore_legacy_wallet — imported {} legacy keys into new wallet",
+        imported_count
+    );
+
     Ok(LegacyRestoreResult {
         new_mnemonic: create_result.mnemonic,
         wallet_path: create_result.wallet_path,
-        old_addresses_scanned: GAP_LIMIT * 2,
-        migration_status: "Wallet created. Call sweep_legacy_to_new to transfer funds.".to_string(),
+        old_addresses_scanned: imported_count,
+        migration_status: format!(
+            "Wallet created with {} legacy keys imported. Call sweep_legacy_to_new to transfer funds.",
+            imported_count
+        ),
     })
 }
 

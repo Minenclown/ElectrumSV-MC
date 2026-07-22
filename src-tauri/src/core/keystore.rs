@@ -101,8 +101,48 @@ pub fn keystore_data_to_bytes(data: &KeyStoreData) -> Vec<u8> {
 }
 
 /// Deserialize keystore data from the derivation_data BLOB.
+///
+/// Supports two formats:
+/// - New format (ElectrumSV-Mc): `{ xpub, xprv, seed_type, derivation, seed, passphrase }`
+/// - Old format (ElectrumSV 1.3.16 BIP32): `{ seed, subpaths, xpub, xprv }`
+///   The old format lacks `derivation` and `seed_type`; we default them.
 pub fn keystore_data_from_bytes(bytes: &[u8]) -> Result<KeyStoreData, serde_json::Error> {
-    serde_json::from_slice(bytes)
+    // First try the new format directly
+    match serde_json::from_slice::<KeyStoreData>(bytes) {
+        Ok(data) => Ok(data),
+        Err(_) => {
+            // Try the old ElectrumSV 1.3.16 format: parse as generic JSON,
+            // then map fields manually
+            let raw: serde_json::Value = serde_json::from_slice(bytes)?;
+            let xpub = raw.get("xpub")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| serde::de::Error::custom("missing field `xpub`"))?
+                .to_string();
+            let xprv = raw.get("xprv")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| serde::de::Error::custom("missing field `xprv`"))?
+                .to_string();
+            let seed = raw.get("seed")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            log::info!(
+                "keystore_data_from_bytes — parsing old ElectrumSV 1.3.x format \
+                 (subpaths present: {})",
+                raw.get("subpaths").is_some()
+            );
+
+            Ok(KeyStoreData {
+                xpub,
+                xprv,
+                seed,
+                seed_type: "bip39".to_string(),
+                derivation: DERIVATION_PATH.to_string(),
+                passphrase: None,
+            })
+        }
+    }
 }
 
 /// Decrypt the xprv from keystore data using the wallet password.

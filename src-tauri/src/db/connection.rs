@@ -283,6 +283,11 @@ pub fn list_wallet_files(data_dir: &str) -> Result<Vec<WalletFileInfo>, std::io:
                 .unwrap_or("unknown")
                 .to_string();
 
+            // Skip non-wallet database files
+            if name == "headers" {
+                continue;
+            }
+
             let metadata = entry.metadata()?;
             let size = metadata.len();
             let modified = metadata

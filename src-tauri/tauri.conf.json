@@ -7,7 +7,7 @@
     "beforeDevCommand": "cd /var/home/RaSt/OpenCode/electrumsv-mc/gui && npm run dev",
     "beforeBuildCommand": "cd /var/home/RaSt/OpenCode/electrumsv-mc/gui && npm run build",
     "devUrl": "http://localhost:5174",
-    "frontendDist": "/var/home/RaSt/OpenCode/electrumsv-mc/gui/dist"
+    "frontendDist": "../gui/dist"
   },
   "app": {
     "windows": [
