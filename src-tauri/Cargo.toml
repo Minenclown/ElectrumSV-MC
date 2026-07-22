@@ -1,6 +1,6 @@
 [package]
 name = "electrumsv-mc"
-version = "0.1.0"
+version = "0.1.1"
 description = "ElectrumSV-Mc — A lightweight BSV wallet"
 edition = "2021"
 
