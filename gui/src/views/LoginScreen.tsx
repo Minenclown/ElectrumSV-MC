@@ -213,13 +213,25 @@ export function LoginScreen() {
     setError(null);
     try {
       const name = restoreName.trim() || 'migrated_wallet';
+      // Step 1: Create new BIP39 wallet from legacy seed
       const result = await api.restoreLegacyWallet(restoreInput.trim(), restorePassword, name);
       if (result?.wallet_path) {
         setActiveWalletPath(result.wallet_path);
       }
-      // Show the new BIP39 mnemonic for backup before proceeding
-      if (result?.mnemonic) {
-        setLegacyMigratedMnemonic(result.mnemonic);
+      // Step 2: Sweep legacy funds to the new wallet
+      if (result?.wallet_path) {
+        try {
+          await api.sweepLegacyWallet(
+            restoreInput.trim(), result.wallet_path, restorePassword
+          );
+        } catch (sweepErr: any) {
+          // Sweep may fail if no UTXOs or network unavailable — non-fatal
+          console.warn('sweep failed:', sweepErr?.message || sweepErr);
+        }
+      }
+      // Step 3: Show the new BIP39 mnemonic for backup before proceeding
+      if (result?.new_mnemonic) {
+        setLegacyMigratedMnemonic(result.new_mnemonic);
       } else {
         // No mnemonic returned — proceed directly to wallet
         await loadWalletInfo();

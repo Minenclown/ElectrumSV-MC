@@ -14,7 +14,6 @@
 use bsv::primitives::base_point::BasePoint;
 use bsv::primitives::big_number::{BigNumber, Endian};
 use bsv::primitives::curve::Curve;
-use bsv::primitives::error::PrimitivesError;
 use bsv::primitives::private_key::PrivateKey;
 use bsv::primitives::public_key::PublicKey;
 use sha2::{Digest, Sha256};
@@ -77,15 +76,16 @@ pub fn derive_mpk(hex_seed: &str) -> Result<String, String> {
 /// (change, index). The data hashed is:
 ///   format!("{}:{}:", index, change).as_bytes() + bytes_from_hex(mpk)
 /// Then z = bytes_to_int_be(SHA256d(data)).
-pub fn get_sequence(mpk: &str, change: u32, index: u32) -> BigNumber {
+pub fn get_sequence(mpk: &str, change: u32, index: u32) -> Result<BigNumber, String> {
     // Legacy Electrum reverses (change, index) to (index, change)
     let prefix = format!("{}:{}:", index, change);
-    let mpk_bytes = hex::decode(mpk).unwrap_or_default();
+    let mpk_bytes = hex::decode(mpk)
+        .map_err(|e| format!("invalid mpk hex: {}", e))?;
     let mut data = Vec::with_capacity(prefix.len() + mpk_bytes.len());
     data.extend_from_slice(prefix.as_bytes());
     data.extend_from_slice(&mpk_bytes);
     let hash = sha256d(&data);
-    BigNumber::from_bytes(&hash, Endian::Big)
+    Ok(BigNumber::from_bytes(&hash, Endian::Big))
 }
 
 /// Derive a child public key from the MPK for a given (change, index).
@@ -96,7 +96,7 @@ pub fn get_sequence(mpk: &str, change: u32, index: u32) -> BigNumber {
 /// 3. offset_point = G * z  (base point multiplication)
 /// 4. child_pubkey = master_pubkey.point + offset_point
 pub fn derive_pubkey(mpk: &str, change: u32, index: u32) -> Result<PublicKey, String> {
-    let z = get_sequence(mpk, change, index);
+    let z = get_sequence(mpk, change, index)?;
 
     // Parse the master public key: prepend 0x04 to the 64-byte mpk
     let mpk_bytes = hex::decode(mpk)
@@ -133,7 +133,7 @@ pub fn derive_private_key(
     index: u32,
 ) -> Result<[u8; 32], String> {
     let secexp = stretch_key(hex_seed.as_bytes());
-    let z = get_sequence(mpk, change, index);
+    let z = get_sequence(mpk, change, index)?;
     let sum = secexp.add(&z);
     let priv_int = sum
         .umod(&curve_order())
@@ -261,16 +261,16 @@ mod tests {
         let mpk = derive_mpk(TEST_HEX_SEED).unwrap();
 
         // Same inputs should produce the same sequence
-        let seq1 = get_sequence(&mpk, 0, 0);
-        let seq2 = get_sequence(&mpk, 0, 0);
+        let seq1 = get_sequence(&mpk, 0, 0).unwrap();
+        let seq2 = get_sequence(&mpk, 0, 0).unwrap();
         assert_eq!(seq1.cmp(&seq2), 0);
 
         // Different indices should produce different sequences
-        let seq3 = get_sequence(&mpk, 0, 1);
+        let seq3 = get_sequence(&mpk, 0, 1).unwrap();
         assert_ne!(seq1.cmp(&seq3), 0);
 
         // Different change should produce different sequences
-        let seq4 = get_sequence(&mpk, 1, 0);
+        let seq4 = get_sequence(&mpk, 1, 0).unwrap();
         assert_ne!(seq1.cmp(&seq4), 0);
     }
 
@@ -440,7 +440,4 @@ mod tests {
         assert_eq!(result, hex_seed);
     }
 
-    // Silence unused import warning for PrimitivesError (used in type annotations)
-    #[allow(unused_imports)]
-    use PrimitivesError as _;
 }
