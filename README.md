@@ -164,6 +164,15 @@ cd src-tauri && cargo tauri build
 cd src-tauri && cargo tauri build --features qrcode-fallback
 ```
 
+### CI / Automated Releases
+
+Releases are built automatically by **GitHub Actions** (`.github/workflows/release.yml`).
+When a tag matching `v*` is pushed, GitHub Actions compiles the app on Ubuntu 22.04
+and publishes `.deb`, `.rpm`, and `.AppImage` artifacts to the corresponding GitHub Release.
+
+Before v0.1.2, release binaries were built locally and uploaded manually.
+From v0.1.2 onward, all releases are CI-built and reproducible.
+
 ### Cross-Platform Notes
 
 The wallet runs on **Linux**, **macOS**, and **Windows**:

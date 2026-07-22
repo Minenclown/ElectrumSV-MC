@@ -65,7 +65,7 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 async-trait = "0.1"
 
 # QR-Code — PicQr (standalone, ISO/IEC 18004, no external QR libs)
-picqr = { path = "../../picqr", default-features = false, features = ["svg"] }
+picqr = { git = "https://github.com/Minenclown/picqr.git", default-features = false, features = ["svg"] }
 
 # QR-Code fallback — battle-tested `qrcode` crate (same algorithm as Python's
 # qrcode library used by the original ElectrumSVP). Enabled via the

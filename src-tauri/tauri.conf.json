@@ -4,8 +4,8 @@
   "version": "0.1.1",
   "identifier": "com.electrumsv.mc",
   "build": {
-    "beforeDevCommand": "cd /var/home/RaSt/OpenCode/electrumsv-mc/gui && npm run dev",
-    "beforeBuildCommand": "cd /var/home/RaSt/OpenCode/electrumsv-mc/gui && npm run build",
+    "beforeDevCommand": "cd gui && npm run dev",
+    "beforeBuildCommand": "cd gui && npm run build",
     "devUrl": "http://localhost:5174",
     "frontendDist": "../gui/dist"
   },
@@ -28,7 +28,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["deb", "rpm"],
+    "targets": ["deb", "rpm", "appimage"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
