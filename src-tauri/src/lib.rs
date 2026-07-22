@@ -154,6 +154,9 @@ pub fn run() {
             commands::services::cosigner_delete_tx,
             commands::services::label_sync_push,
             commands::services::label_sync_pull,
+            // Legacy migration commands
+            commands::restore::restore_legacy_wallet,
+            commands::restore::sweep_legacy_to_new,
         ])
         .setup(|_app| {
             log::info!("Tauri setup complete — ready for IPC commands");

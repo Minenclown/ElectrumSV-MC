@@ -81,6 +81,13 @@ export const en = {
     restoreInvalidMnemonic: 'Invalid mnemonic. Check your seed words.',
     restoreInvalidWif: 'Invalid WIF key. Check your private key.',
     restoreCancel: 'Cancel',
+    legacyToggle: 'Legacy ElectrumSV (1.3.x)',
+    legacyWarningTitle: 'Legacy Wallet Migration',
+    legacyWarningBody: 'You are about to restore a legacy ElectrumSV wallet. Your old keys will be migrated to a new BIP39 wallet. All funds will be automatically swept to new addresses. After migration, you MUST back up your new mnemonic seed phrase. This process may take a moment.',
+    legacyMigrate: 'Migrate & Continue',
+    legacyMigrating: 'Migrating wallet...',
+    legacyMigrationDone: 'Migration complete! Your new mnemonic is shown below. Back it up immediately.',
+    legacyNewMnemonic: 'Your New Mnemonic (BACK UP NOW)',
   },
 
   // Main view — tabs

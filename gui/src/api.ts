@@ -106,6 +106,12 @@ export const api = {
     invoke<any>('open_wallet', { walletPath }),
   closeWallet: (walletPath: string) =>
     invoke<any>('close_wallet'),
+
+  // Legacy ElectrumSV (1.3.x) seed migration
+  restoreLegacyWallet: (seedWords: string, password: string, walletName?: string) =>
+    invoke<any>('restore_legacy_wallet', { seedWords, password, walletName: walletName || 'migrated_wallet' }),
+  sweepLegacyWallet: (seedWords: string, newWalletPath: string, password: string) =>
+    invoke<any>('sweep_legacy_to_new', { seedWords, newWalletPath, password }),
   unlockWallet: (walletPath: string, password: string) =>
     invoke<any>('unlock_wallet', { password }),
   unlockWalletWithTOTP: (walletPath: string, password: string, _totpCode?: string) =>

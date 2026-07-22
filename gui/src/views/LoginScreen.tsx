@@ -36,6 +36,12 @@ export function LoginScreen() {
   const [restoreName, setRestoreName] = useState('');
   const [restorePassword, setRestorePassword] = useState('');
 
+  // Legacy ElectrumSV (1.3.x) migration state
+  const [legacyMode, setLegacyMode] = useState(false);
+  const [showLegacyWarning, setShowLegacyWarning] = useState(false);
+  const [migrating, setMigrating] = useState(false);
+  const [legacyMigratedMnemonic, setLegacyMigratedMnemonic] = useState<string | null>(null);
+
   // In Tauri mode, the backend is always available (same process)
   const hasToken = true;
 
@@ -161,10 +167,23 @@ export function LoginScreen() {
     setRestoreInput('');
     setRestoreName('');
     setRestorePassword('');
+    setLegacyMode(false);
+    setShowLegacyWarning(false);
+    setMigrating(false);
+    setLegacyMigratedMnemonic(null);
     setView('landing');
   };
 
   const handleRestore = async () => {
+    // Legacy mode: show warning dialog first instead of restoring directly
+    if (restoreMethod === 'mnemonic' && legacyMode) {
+      setShowLegacyWarning(true);
+      return;
+    }
+    await doRestore();
+  };
+
+  const doRestore = async () => {
     setLoading(true);
     setError(null);
     try {
@@ -188,12 +207,75 @@ export function LoginScreen() {
     }
   };
 
+  const handleLegacyMigrate = async () => {
+    setShowLegacyWarning(false);
+    setMigrating(true);
+    setError(null);
+    try {
+      const name = restoreName.trim() || 'migrated_wallet';
+      const result = await api.restoreLegacyWallet(restoreInput.trim(), restorePassword, name);
+      if (result?.wallet_path) {
+        setActiveWalletPath(result.wallet_path);
+      }
+      // Show the new BIP39 mnemonic for backup before proceeding
+      if (result?.mnemonic) {
+        setLegacyMigratedMnemonic(result.mnemonic);
+      } else {
+        // No mnemonic returned — proceed directly to wallet
+        await loadWalletInfo();
+      }
+    } catch (e: any) {
+      setError(e.message || t.login.restoreInvalidMnemonic);
+    } finally {
+      setMigrating(false);
+    }
+  };
+
+  const handleLegacyMnemonicDone = async () => {
+    setLegacyMigratedMnemonic(null);
+    await loadWalletInfo();
+  };
+
   // Restoration is a separate page. Sensitive values are entered only here,
   // never in the wallet selector/login screen.
   if (mode === 'restore') {
     const canRestore = Boolean(
       restoreMethod && restoreInput.trim() && restoreName.trim() && restorePassword.length >= 4,
     );
+
+    // Legacy migration mnemonic display (after successful restoreLegacyWallet)
+    if (legacyMigratedMnemonic) {
+      return (
+        <div className="flex h-screen items-center justify-center bg-void-950">
+          <div className="w-full max-w-lg px-4">
+            <div className="text-center mb-6">
+              <div className="text-3xl font-bold text-accent mb-2">{t.login.legacyWarningTitle}</div>
+              <div className="text-sm text-success">{t.login.legacyMigrationDone}</div>
+            </div>
+            <div className="bg-void-900 rounded-xl p-6 border border-void-700">
+              <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 mb-4">
+                <p className="text-xs text-red-400 font-medium">
+                  {t.login.legacyNewMnemonic}
+                </p>
+              </div>
+              <div className="bg-void-950 border border-void-700 rounded-lg p-4 mb-4">
+                <div className="text-sm text-gray-100 font-mono leading-relaxed break-words select-all">
+                  {legacyMigratedMnemonic}
+                </div>
+              </div>
+              <button
+                onClick={handleLegacyMnemonicDone}
+                disabled={loading}
+                className="w-full bg-accent hover:bg-accent-hover text-white rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-50 transition-colors"
+              >
+                {loading ? t.common.loading : t.login.confirmOpen}
+              </button>
+              {error && <div className="text-sm text-danger mt-3">{error}</div>}
+            </div>
+          </div>
+        </div>
+      );
+    }
 
     return (
       <div className="flex min-h-screen items-center justify-center bg-void-950 px-4 py-8">
@@ -216,26 +298,74 @@ export function LoginScreen() {
               </div>
             ) : (
               <>
-                <button onClick={() => { setRestoreMethod(null); setRestoreInput(''); setError(null); }} className="text-xs text-gray-400 hover:text-gray-100 mb-4 transition-colors">
+                <button onClick={() => { setRestoreMethod(null); setRestoreInput(''); setError(null); setLegacyMode(false); }} className="text-xs text-gray-400 hover:text-gray-100 mb-4 transition-colors">
                   ← {t.login.restoreDesc}
                 </button>
                 <label className="block text-xs text-gray-400 mb-1">{t.login.restoreNameLabel}</label>
                 <input type="text" value={restoreName} onChange={(e) => setRestoreName(e.target.value)} placeholder="restored_wallet" className="w-full bg-void-800 border border-void-700 rounded-lg px-3 py-2 text-sm text-gray-100 focus:border-accent outline-none mb-3" />
                 <label className="block text-xs text-gray-400 mb-1">{restoreMethod === 'mnemonic' ? t.login.restoreMnemonic : t.login.restoreWif}</label>
                 <textarea value={restoreInput} onChange={(e) => setRestoreInput(e.target.value)} placeholder={restoreMethod === 'mnemonic' ? t.login.restoreMnemonicPlaceholder : t.login.restoreWifPlaceholder} className="w-full h-24 bg-void-800 border border-void-700 rounded-lg px-3 py-2 text-sm text-gray-100 font-mono focus:border-accent outline-none mb-3 resize-none" autoFocus spellCheck={false} />
+                {restoreMethod === 'mnemonic' && (
+                  <button
+                    onClick={() => setLegacyMode(!legacyMode)}
+                    className={`w-full rounded-lg border px-3 py-2 text-xs font-medium mb-3 transition-all ${
+                      legacyMode
+                        ? 'border-red-500 bg-red-500/10 text-red-400 shadow-[0_0_12px_rgba(239,68,68,0.3)]'
+                        : 'border-void-700 text-gray-400 hover:border-gray-500'
+                    }`}
+                  >
+                    {legacyMode ? '● ' : ''}{t.login.legacyToggle}
+                  </button>
+                )}
                 <label className="block text-xs text-gray-400 mb-1">{t.login.restorePasswordLabel}</label>
                 <input type="password" value={restorePassword} onChange={(e) => setRestorePassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && canRestore && handleRestore()} className="w-full bg-void-800 border border-void-700 rounded-lg px-3 py-2 text-sm text-gray-100 focus:border-accent outline-none mb-4" />
-                <button onClick={handleRestore} disabled={loading || !canRestore} className="w-full bg-accent hover:bg-accent-hover text-white rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
-                  {loading ? t.login.restoring : t.login.restoreButton}
+                <button onClick={handleRestore} disabled={loading || migrating || !canRestore} className="w-full bg-accent hover:bg-accent-hover text-white rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+                  {loading || migrating ? (legacyMode ? t.login.legacyMigrating : t.login.restoring) : t.login.restoreButton}
                 </button>
               </>
             )}
             {error && <div className="text-sm text-danger mt-3">{error}</div>}
           </div>
-          <button onClick={() => { setRestoreMethod(null); setRestoreInput(''); setError(null); setMode(selectedWallet ? 'login' : 'create'); }} className="w-full text-center text-xs text-gray-400 hover:text-gray-100 mt-4 transition-colors">
+          <button onClick={() => { setRestoreMethod(null); setRestoreInput(''); setError(null); setLegacyMode(false); setMode(selectedWallet ? 'login' : 'create'); }} className="w-full text-center text-xs text-gray-400 hover:text-gray-100 mt-4 transition-colors">
             {t.login.restoreCancel}
           </button>
         </div>
+
+        {/* Legacy migration warning dialog */}
+        {showLegacyWarning && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+            <div className="w-full max-w-md mx-4 bg-void-900 rounded-xl border border-red-500/50 shadow-2xl">
+              <div className="p-6">
+                <div className="text-xl font-bold text-red-400 mb-4">{t.login.legacyWarningTitle}</div>
+                <p className="text-sm text-gray-300 leading-relaxed mb-6">{t.login.legacyWarningBody}</p>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setShowLegacyWarning(false)}
+                    className="flex-1 rounded-lg border border-void-700 bg-void-800 text-gray-400 px-4 py-2 text-sm font-medium hover:text-gray-100 transition-colors"
+                  >
+                    {t.login.restoreCancel}
+                  </button>
+                  <button
+                    onClick={handleLegacyMigrate}
+                    className="flex-1 rounded-lg bg-red-600 hover:bg-red-700 text-white px-4 py-2 text-sm font-medium transition-colors"
+                  >
+                    {t.login.legacyMigrate}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Migration progress overlay */}
+        {migrating && !showLegacyWarning && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+            <div className="bg-void-900 rounded-xl border border-void-700 px-8 py-6 flex flex-col items-center gap-4">
+              <div className="w-8 h-8 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+              <div className="text-sm text-gray-300">{t.login.legacyMigrating}</div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }

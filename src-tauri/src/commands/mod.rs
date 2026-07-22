@@ -11,6 +11,7 @@ pub mod labels;
 pub mod network;
 pub mod payment_requests;
 pub mod qrcode;
+pub mod restore;
 pub mod services;
 pub mod transactions;
 pub mod wallet;
